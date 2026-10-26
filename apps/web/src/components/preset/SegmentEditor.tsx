@@ -1,11 +1,12 @@
 import { useState } from "react";
-import type { Palette, Segment } from "@wled-manager/shared";
+import type { LedMarker, Palette, Segment } from "@wled-manager/shared";
 import type { Catalog } from "../../queries";
 import { ColorField } from "./ColorField";
 import { PalettePicker } from "./PalettePicker";
 import { ALL_CONTROLS, parseFxData } from "./fxdata";
+import { BLEND_MODES } from "./wled-options";
 
-const TYPED_KEYS = new Set(["id", "start", "stop", "on", "bri", "fx", "fxName", "sx", "ix", "c1", "c2", "c3", "o1", "o2", "o3", "col", "pal"]);
+const TYPED_KEYS = new Set(["id", "start", "stop", "on", "bri", "fx", "fxName", "sx", "ix", "c1", "c2", "c3", "o1", "o2", "o3", "col", "pal", "bm"]);
 
 interface Props {
   index: number;
@@ -13,13 +14,16 @@ interface Props {
   catalog: Catalog | undefined;
   library: Palette[];
   rgbw: boolean;
+  /** Labelled LED positions on the source controller, suggested for start/stop. */
+  markers: LedMarker[];
   onChange: (s: Segment) => void;
   onRemove: () => void;
 }
 
 const numberOrUndefined = (v: string) => (v.trim() === "" ? undefined : Math.max(0, Math.round(Number(v)) || 0));
 
-export function SegmentEditor({ index, segment: s, catalog, library, rgbw, onChange, onRemove }: Props) {
+export function SegmentEditor({ index, segment: s, catalog, library, rgbw, markers, onChange, onRemove }: Props) {
+  const markerList = `segment-markers-${index}`;
   const [showAll, setShowAll] = useState(false);
   const set = (patch: Partial<Segment>) => onChange({ ...s, ...patch });
   const effects = catalog?.effects ?? [];
@@ -64,6 +68,7 @@ export function SegmentEditor({ index, segment: s, catalog, library, rgbw, onCha
           <input
             value={s.start ?? ""}
             onChange={(e) => set({ start: numberOrUndefined(e.target.value) })}
+            list={markerList}
             placeholder="keep"
             inputMode="numeric"
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
@@ -74,11 +79,17 @@ export function SegmentEditor({ index, segment: s, catalog, library, rgbw, onCha
           <input
             value={s.stop ?? ""}
             onChange={(e) => set({ stop: numberOrUndefined(e.target.value) })}
+            list={markerList}
             placeholder="keep"
             inputMode="numeric"
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
           />
         </label>
+        <datalist id={markerList}>
+          {markers.map((m) => (
+            <option key={m.index} value={m.index}>{m.label}</option>
+          ))}
+        </datalist>
       </div>
 
       {controls.sliders.length > 0 && (
@@ -139,11 +150,28 @@ export function SegmentEditor({ index, segment: s, catalog, library, rgbw, onCha
         ))}
       </div>
 
-      <div className="mt-3">
-        <span className="text-xs text-neutral-400">
-          Palette{!controls.usesPalette && " (this effect doesn't use one)"}
-        </span>
-        <PalettePicker value={s.pal} builtins={catalog?.palettes ?? []} library={library} onChange={(pal) => set({ pal })} />
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_12rem]">
+        <div>
+          <span className="text-xs text-neutral-400">
+            Palette{!controls.usesPalette && " (this effect doesn't use one)"}
+          </span>
+          <PalettePicker value={s.pal} builtins={catalog?.palettes ?? []} library={library} onChange={(pal) => set({ pal })} />
+        </div>
+        <label className="flex flex-col">
+          <span className="text-xs text-neutral-400">Blend mode</span>
+          <select
+            value={s.bm ?? ""}
+            onChange={(e) => set({ bm: e.target.value === "" ? undefined : Number(e.target.value) })}
+            title="How this segment combines with segments below it. Needs recent WLED firmware."
+            className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+          >
+            <option value="">(unchanged)</option>
+            {BLEND_MODES.map((label, value) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+            {s.bm !== undefined && s.bm >= BLEND_MODES.length && <option value={s.bm}>Mode {s.bm}</option>}
+          </select>
+        </label>
       </div>
 
       {extraKeys.length > 0 && (

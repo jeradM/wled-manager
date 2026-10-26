@@ -61,6 +61,8 @@ export const segment = z.looseObject({
   o3: z.boolean().optional(),
   col: z.array(wledColor).max(3).optional(),
   pal: paletteRef.optional(),
+  /** How the segment is blended with segments below it (newer firmware). */
+  bm: z.number().int().min(0).max(255).optional(),
 });
 export type Segment = z.infer<typeof segment>;
 
@@ -68,6 +70,8 @@ export const presetState = z.looseObject({
   on: z.boolean().optional(),
   bri: byte.optional(),
   transition: z.number().int().min(0).max(65535).optional(),
+  /** Transition style when the preset loads (newer firmware). */
+  bs: z.number().int().min(0).max(255).optional(),
   mainseg: z.number().int().optional(),
   seg: z.array(segment).max(32),
 });
@@ -108,19 +112,47 @@ export type Preset = z.infer<typeof preset>;
 
 // ---- Controllers ----
 
-export const controllerInput = z.object({
+/** How the LED locator draws a controller's LEDs. */
+export const ledLayout = z.object({
+  type: z.enum(["strip", "grid", "ring"]),
+  /** LEDs per row for strip and grid layouts. */
+  columns: z.number().int().min(1).max(1024),
+  /** Grid only: every other row runs backwards, as in a zig-zag wired matrix. */
+  serpentine: z.boolean(),
+  /** Draw LED 0 at the end instead of the start. */
+  reverse: z.boolean(),
+});
+export type LedLayout = z.infer<typeof ledLayout>;
+
+export const DEFAULT_LED_LAYOUT: LedLayout = { type: "strip", columns: 50, serpentine: false, reverse: false };
+
+/** A labelled LED position, e.g. "roof corner", found with the locator. */
+export const ledMarker = z.object({ index: z.number().int().min(0), label: z.string().min(1).max(40) });
+export type LedMarker = z.infer<typeof ledMarker>;
+
+const controllerFields = {
   name: z.string().min(1).max(64),
   host: z.string().min(1),
-  port: z.number().int().min(1).max(65535).default(80),
+  port: z.number().int().min(1).max(65535),
   pin: z.string().max(4).optional(),
-  tags: z.array(z.string()).default([]),
+  tags: z.array(z.string()),
+};
+
+export const controllerInput = z.object({
+  ...controllerFields,
+  port: controllerFields.port.default(80),
+  tags: controllerFields.tags.default([]),
 });
 export type ControllerInput = z.infer<typeof controllerInput>;
 
 export const controllerStatus = z.enum(["unknown", "online", "offline"]);
 export type ControllerStatus = z.infer<typeof controllerStatus>;
 
-export const controllerUpdate = controllerInput.partial();
+// Built from the fields without defaults: a partial update must leave omitted fields alone.
+export const controllerUpdate = z.object(controllerFields).partial().extend({
+  layout: ledLayout.optional(),
+  markers: z.array(ledMarker).max(500).optional(),
+});
 export type ControllerUpdate = z.infer<typeof controllerUpdate>;
 
 /** Summary of the device's /json/info, captured at the last successful poll. */
@@ -146,6 +178,8 @@ export const controller = controllerInput.omit({ pin: true }).extend({
   device: deviceSummary.nullable(),
   lastSeen: z.string().nullable(),
   lastError: z.string().nullable(),
+  layout: ledLayout,
+  markers: z.array(ledMarker),
 });
 export type Controller = z.infer<typeof controller>;
 

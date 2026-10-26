@@ -89,6 +89,16 @@ describe("controllers API", () => {
     expect(mock.getState()).toMatchObject({ on: false, bri: 42 });
   });
 
+  it("leaves fields out of a partial update untouched", async () => {
+    const c = (await add({ name: "Porch", host: mock.host, port: mock.port, tags: ["outdoor"] })).json<Controller>();
+    const res = await t.app.inject({
+      method: "PATCH",
+      url: `/api/controllers/${c.id}`,
+      payload: { markers: [{ index: 1, label: "x" }] },
+    });
+    expect(res.json<Controller>()).toMatchObject({ name: "Porch", port: mock.port, tags: ["outdoor"] });
+  });
+
   it("updates and deletes", async () => {
     const c = (await add({ name: "Porch", host: mock.host, port: mock.port })).json<Controller>();
     const patched = await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: { name: "Front" } });

@@ -84,7 +84,11 @@ export function useDeleteController() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/controllers/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.controllers }),
+    // Drop the deleted item's own query instead of refetching it into a 404; don't wait on the refresh.
+    onSuccess: (_, id) => {
+      qc.removeQueries({ queryKey: keys.controller(id), exact: true });
+      void qc.invalidateQueries({ queryKey: keys.controllers });
+    },
   });
 }
 
@@ -127,7 +131,11 @@ export function useDeletePalette() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/palettes/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.palettes }),
+    // Drop the deleted item's own query instead of refetching it into a 404; don't wait on the refresh.
+    onSuccess: (_, id) => {
+      qc.removeQueries({ queryKey: keys.palette(id), exact: true });
+      void qc.invalidateQueries({ queryKey: keys.palettes });
+    },
   });
 }
 
@@ -176,7 +184,11 @@ export function useDeletePreset() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/presets/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.presets }),
+    // Drop the deleted item's own query instead of refetching it into a 404; don't wait on the refresh.
+    onSuccess: (_, id) => {
+      qc.removeQueries({ queryKey: keys.preset(id), exact: true });
+      void qc.invalidateQueries({ queryKey: keys.presets });
+    },
   });
 }
 

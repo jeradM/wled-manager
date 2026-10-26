@@ -144,7 +144,7 @@ describe("palette tools", () => {
     expect(res.json()).toEqual({ slot: 1, deviceId: 254 });
     expect(mock.files.get("/palette0.json")).toContain("123456");
     expect(mock.files.has("/palette1.json")).toBe(true);
-    expect(mock.getState().seg).toEqual({ pal: 254 });
+    expect((mock.getState().seg as { pal?: number }[])[0]!.pal).toBe(254);
   });
 
   it("lists built-in palettes, marking color-derived ones as not copyable", async () => {

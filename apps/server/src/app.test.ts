@@ -12,4 +12,15 @@ describe("app", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ok: true });
   });
+
+  it("accepts bodiless POSTs labelled as JSON and rejects malformed JSON", async () => {
+    const t = await createTestApp();
+    cleanup = t.cleanup;
+    const json = { "content-type": "application/json" };
+    // No such controller: getting a 404 (not a 400) shows the empty body was accepted.
+    const empty = await t.app.inject({ method: "POST", url: "/api/controllers/nope/refresh", headers: json });
+    expect(empty.statusCode).toBe(404);
+    const bad = await t.app.inject({ method: "POST", url: "/api/palettes", headers: json, payload: "{nope" });
+    expect(bad.statusCode).toBe(400);
+  });
 });

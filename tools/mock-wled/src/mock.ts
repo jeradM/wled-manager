@@ -83,6 +83,50 @@ export function createMockWled({
   });
   app.register(multipart);
 
+  // Pixel colors ("rrggbb") of segment 0 while frozen by individual LED control (seg.i).
+  let pixels: string[] = [];
+  let frozen = false;
+
+  /** Merges segment updates by id like WLED; an object applies to the main segment. */
+  const applySegments = (seg: unknown) => {
+    const list = (Array.isArray(seg) ? seg : [seg]) as Record<string, unknown>[];
+    const segs = state.seg as Record<string, unknown>[];
+    list.forEach((entry, pos) => {
+      const { i, ...fields } = entry;
+      const id = typeof fields.id === "number" ? fields.id : Array.isArray(seg) ? pos : 0;
+      let target = segs.find((s) => s.id === id);
+      if (!target) segs.push((target = { id }));
+      Object.assign(target, fields);
+      if (id === 0 && fields.frz === false) frozen = false;
+      if (id === 0 && Array.isArray(i)) setPixels(i, target);
+    });
+  };
+
+  /** WLED's seg.i: [index, color] or [start, stop, color] runs; the first call freezes and blanks. */
+  const setPixels = (items: unknown[], target: Record<string, unknown>) => {
+    const len = Number(target.stop ?? ledCount) - Number(target.start ?? 0);
+    if (!frozen) {
+      frozen = true;
+      target.frz = true;
+      pixels = Array(len).fill("000000");
+    }
+    let nums: number[] = [];
+    for (const item of items) {
+      if (typeof item === "number") {
+        nums.push(item);
+        continue;
+      }
+      const color = typeof item === "string" ? item.toLowerCase() : (item as number[]).slice(0, 3).map((v) => v.toString(16).padStart(2, "0")).join("");
+      const [start = 0, stop = start + 1] = nums;
+      for (let p = start; p < Math.min(stop, len); p++) pixels[p] = color;
+      // A lone index advances, so ["ff0000", "00ff00"] after 5 sets 5 and 6.
+      nums = nums.length === 1 ? [start + 1] : [];
+    }
+  };
+
+  // Test/debug only (not part of WLED): what individual LED control has set.
+  app.get("/__mock/pixels", async () => ({ frozen, lit: pixels.flatMap((c, i) => (c !== "000000" ? [[i, c]] : [])) }));
+
   app.get("/json", async () => ({ state, info: info(), effects: EFFECTS, palettes: PALETTES }));
   app.get("/json/info", async () => info());
   app.get("/json/state", async () => state);
@@ -131,7 +175,9 @@ export function createMockWled({
       p[String(psave)] = { n, ...(ql ? { ql } : {}), ...(o ? rest : state) };
       writePresets(p);
     } else if (typeof pdel !== "number") {
-      state = { ...state, ...rest };
+      const { seg, ...top } = rest;
+      state = { ...state, ...top };
+      if (seg !== undefined) applySegments(seg);
     }
     return { success: true };
   });
@@ -158,5 +204,7 @@ export function createMockWled({
     return reply.send("File deleted");
   });
 
-  return { app, files, writes, getState: () => state, requestCount: () => requests, maxInFlight: () => maxInFlight, loadedPalettes: () => loadedPalettes.length, palettesInMemory: () => [...loadedPalettes] };
+  return { app, files, writes, getState: () => state, requestCount: () => requests,
+    pixels: () => [...pixels],
+    isFrozen: () => frozen, maxInFlight: () => maxInFlight, loadedPalettes: () => loadedPalettes.length, palettesInMemory: () => [...loadedPalettes] };
 }

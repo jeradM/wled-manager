@@ -29,6 +29,13 @@
       "when": 1792983507658,
       "tag": "0003_presets_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793050889203,
+      "tag": "0004_locator",
+      "breakpoints": true
     }
   ]
 }

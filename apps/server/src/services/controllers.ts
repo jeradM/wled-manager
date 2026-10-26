@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import type { Controller, ControllerInput, ControllerUpdate } from "@wled-manager/shared";
+import { DEFAULT_LED_LAYOUT, type Controller, type ControllerInput, type ControllerUpdate } from "@wled-manager/shared";
 import type { Db } from "../db/index.js";
 import { controllers } from "../db/schema.js";
 import type { EventBus } from "../events.js";
@@ -28,6 +28,8 @@ export function toController(row: ControllerRow): Controller {
     status: row.status,
     lastSeen: row.lastSeen,
     lastError: row.lastError,
+    layout: row.layout ?? DEFAULT_LED_LAYOUT,
+    markers: [...row.markers].sort((a, b) => a.index - b.index),
     device: info
       ? {
           version: info.ver,

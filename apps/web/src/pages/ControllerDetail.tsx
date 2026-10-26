@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import type { Controller } from "@wled-manager/shared";
 import {
   useController,
@@ -36,6 +36,9 @@ export function ControllerDetail() {
         title={c.name}
         actions={
           <>
+            <Link to="/controllers/$id/locate" params={{ id: c.id }}>
+              <Button disabled={c.status !== "online"}>Locate LEDs</Button>
+            </Link>
             <Button onClick={() => setImporting(true)} disabled={importing || c.status !== "online"}>
               Import from controller
             </Button>

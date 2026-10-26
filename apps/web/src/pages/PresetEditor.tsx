@@ -13,6 +13,7 @@ import {
 } from "../queries";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
 import { isClearMarker, rawKind } from "../components/preset/describe";
+import { TRANSITION_STYLES } from "../components/preset/wled-options";
 import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
 
 export function NewPreset() {
@@ -159,7 +160,7 @@ function PresetEditor({ id }: { id?: string }) {
                 />
               ) : (
                 <div className="flex flex-col gap-4">
-                  <div className="grid grid-cols-[auto_1fr_8rem] items-end gap-4 text-sm">
+                  <div className="grid grid-cols-[auto_1fr_7rem_10rem] items-end gap-4 text-sm">
                     <label className="flex items-center gap-2 pb-1">
                       <input type="checkbox" checked={draft.state!.on ?? true} onChange={(e) => setState({ on: e.target.checked })} />
                       On
@@ -188,6 +189,20 @@ function PresetEditor({ id }: { id?: string }) {
                         className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
                       />
                     </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs text-neutral-400">Transition style</span>
+                      <select
+                        value={draft.state!.bs ?? ""}
+                        onChange={(e) => setState({ bs: e.target.value === "" ? undefined : Number(e.target.value) })}
+                        title="How the preset blends in when it loads. Needs recent WLED firmware."
+                        className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
+                      >
+                        <option value="">(unchanged)</option>
+                        {TRANSITION_STYLES.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}{t.matrix ? " (2D)" : ""}</option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                   {segments.map((s, i) =>
                     isClearMarker(s) ? null : (
@@ -198,6 +213,7 @@ function PresetEditor({ id }: { id?: string }) {
                         catalog={catalog}
                         library={palettes}
                         rgbw={rgbw}
+                        markers={sourceController?.markers ?? []}
                         onChange={(next) => setSegment(i, next)}
                         onRemove={() => removeSegment(i)}
                       />
