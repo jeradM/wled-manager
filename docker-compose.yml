@@ -1,0 +1,8 @@
+services:
+  wled-manager:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
