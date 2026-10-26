@@ -28,5 +28,7 @@ describe("palette conversion", () => {
   it("maps slots to device palette IDs", () => {
     expect(customPaletteId(0)).toBe(255);
     expect(customPaletteId(9)).toBe(246);
+    expect(customPaletteId(0, 200)).toBe(200);
+    expect(customPaletteId(3, 200)).toBe(197);
   });
 });

@@ -4,7 +4,13 @@ import type { Controller, ControllerInput, ControllerUpdate } from "@wled-manage
 import type { Db } from "../db/index.js";
 import { controllers } from "../db/schema.js";
 import type { EventBus } from "../events.js";
-import { DEFAULT_CUSTOM_PALETTE_MAX, WledClient, type WledClientOptions, type WledInfo } from "../wled/client.js";
+import {
+  customPaletteBase,
+  DEFAULT_CUSTOM_PALETTE_MAX,
+  WledClient,
+  type WledClientOptions,
+  type WledInfo,
+} from "../wled/client.js";
 
 type ControllerRow = typeof controllers.$inferSelect;
 
@@ -33,6 +39,7 @@ export function toController(row: ControllerRow): Controller {
           effectCount: info.fxcount ?? row.effects?.length ?? 0,
           customPaletteCount: info.cpalcount ?? 0,
           customPaletteMax: info.cpalmax ?? DEFAULT_CUSTOM_PALETTE_MAX,
+          customPaletteBase: customPaletteBase(info),
         }
       : null,
   };

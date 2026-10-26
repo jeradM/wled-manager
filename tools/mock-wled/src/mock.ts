@@ -12,6 +12,8 @@ export interface MockOptions {
   rgbw?: boolean;
   /** Reported as info.cpalmax; omit to mimic upstream firmware that doesn't report it. */
   customPaletteMax?: number;
+  /** Mimic upstream WLED main: palette IDs from 200 down, umpalcount in info, rmcpal command. */
+  modernPalettes?: boolean;
   /** Artificial response delay, to make request overlap observable in tests. */
   delayMs?: number;
 }
@@ -27,6 +29,7 @@ export function createMockWled({
   rgbw = true,
   customPaletteMax = 10,
   delayMs = 0,
+  modernPalettes = false,
 }: MockOptions = {}) {
   const files = new Map<string, string>([["/presets.json", JSON.stringify({ "0": {} })]]);
   let state: Record<string, unknown> = {
@@ -39,8 +42,6 @@ export function createMockWled({
 
   const presets = () => JSON.parse(files.get("/presets.json")!) as Record<string, unknown>;
   const writePresets = (p: Record<string, unknown>) => files.set("/presets.json", JSON.stringify(p));
-  const customPalettes = () =>
-    [...files.keys()].filter((f) => /^\/palette\d+\.json$/.test(f)).length;
 
   const info = () => ({
     ver: version,
@@ -50,10 +51,21 @@ export function createMockWled({
     arch: "esp32",
     mac: "aabbccddeeff",
     fxcount: EFFECTS.length,
-    palcount: PALETTES.length + customPalettes(),
-    cpalcount: customPalettes(),
+    palcount: PALETTES.length + loadedPalettes.length,
+    cpalcount: loadedPalettes.length,
     ...(customPaletteMax !== undefined ? { cpalmax: customPaletteMax } : {}),
+    ...(modernPalettes ? { umpalcount: 0 } : {}),
   });
+
+  // Palettes as the firmware has loaded them. Like real WLED, this only changes when palettes are
+  // reloaded (palette upload or rmcpal), not when a file is deleted directly.
+  let loadedPalettes: string[] = [];
+  const reloadPalettes = () => {
+    loadedPalettes = [];
+    for (let i = 0; i < 20; i++) loadedPalettes.push(files.get(`/palette${i}.json`) ?? "");
+    while (loadedPalettes.length && !loadedPalettes.at(-1)) loadedPalettes.pop();
+  };
+  const base = modernPalettes ? 200 : 255;
 
   const app = Fastify({ logger: false });
   const writes: string[] = [];
@@ -78,13 +90,36 @@ export function createMockWled({
   app.get("/json/pal", async () => PALETTES);
   app.get("/json/fxdata", async () => FXDATA);
 
-  app.get<{ Querystring: { list?: string } }>("/edit", async (req, reply) => {
-    if (req.query.list === undefined) return reply.code(404).send("Not found");
-    return [...files].map(([f, content]) => ({ name: f.slice(1), type: "file", size: content.length }));
+  app.get<{ Querystring: { page?: string } }>("/json/palx", async (req) => {
+    const p: Record<string, unknown> = {};
+    PALETTES.forEach((_, id) => {
+      p[id] = id < 6 ? ["c1", "c2"] : [[0, id * 10, 0, 0], [255, 0, 0, id * 10]];
+    });
+    loadedPalettes.forEach((content, i) => {
+      if (content) p[base - i] = (JSON.parse(content).palette as unknown[]).length ? [[0, 1, 2, 3], [255, 4, 5, 6]] : [];
+    });
+    return { m: 0, p };
+  });
+
+  app.get<{ Querystring: { list?: string; func?: string; path?: string } }>("/edit", async (req, reply) => {
+    const { list, func, path } = req.query;
+    if (list !== undefined || func === "list")
+      return [...files].map(([f, content]) => ({ name: f.slice(1), type: "file", size: content.length }));
+    if (func === "delete" && path) {
+      writes.push(`DELETE ${path}`);
+      if (!files.delete(path)) return reply.code(404).send("File not found");
+      return reply.send("File deleted");
+    }
+    return reply.code(404).send("Not found");
   });
 
   app.post<{ Body: Record<string, unknown> }>("/json/state", async (req) => {
-    const { psave, pdel, n, o, ib, sb, ql, ...rest } = req.body ?? {};
+    const { psave, pdel, n, o, ib, sb, ql, rmcpal, ...rest } = req.body ?? {};
+    if (typeof rmcpal === "number" && modernPalettes) {
+      files.delete(`/palette${rmcpal}.json`);
+      reloadPalettes();
+      return { success: true };
+    }
     if (typeof pdel === "number") {
       const p = presets();
       delete p[String(pdel)];
@@ -112,14 +147,16 @@ export function createMockWled({
     if (!part) return reply.code(400).send("No file");
     const filename = part.filename.startsWith("/") ? part.filename : `/${part.filename}`;
     files.set(filename, (await part.toBuffer()).toString("utf8"));
+    if (filename.includes("palette") && filename.endsWith(".json")) reloadPalettes();
     return reply.send("File Uploaded!");
   });
 
+  // Legacy delete; real older firmware may expect the path as a form field instead.
   app.delete<{ Querystring: { path?: string } }>("/edit", async (req, reply) => {
     const path = req.query.path;
     if (!path || !files.delete(path)) return reply.code(404).send("Not found");
     return reply.send("File deleted");
   });
 
-  return { app, files, writes, getState: () => state, requestCount: () => requests, maxInFlight: () => maxInFlight };
+  return { app, files, writes, getState: () => state, requestCount: () => requests, maxInFlight: () => maxInFlight, loadedPalettes: () => loadedPalettes.length, palettesInMemory: () => [...loadedPalettes] };
 }

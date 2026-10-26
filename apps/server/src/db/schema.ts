@@ -29,6 +29,8 @@ export const palettes = sqliteTable("palettes", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   stops: text("stops", { mode: "json" }).$type<PaletteStop[]>().notNull(),
+  /** Sync priority: lower positions get slots first when a controller runs out of room. */
+  position: integer("position").notNull().default(0),
   revision: integer("revision").notNull().default(1),
   ...timestamps,
 });
@@ -78,6 +80,8 @@ export const syncState = sqliteTable("sync_state", {
   lastAppliedHash: text("last_applied_hash"),
   observedHash: text("observed_hash"),
   drifted: integer("drifted", { mode: "boolean" }).notNull().default(false),
+  /** Palette files as last written by the manager: slot -> normalized contents (paletteKey). */
+  writtenPalettes: text("written_palettes", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
   lastError: text("last_error"),
   lastSyncedAt: text("last_synced_at"),
 });

@@ -99,6 +99,8 @@ export const deviceSummary = z.object({
   effectCount: z.number().int(),
   customPaletteCount: z.number().int(),
   customPaletteMax: z.number().int(),
+  /** Device palette ID of /palette0.json; later slots count down from it. */
+  customPaletteBase: z.number().int(),
 });
 export type DeviceSummary = z.infer<typeof deviceSummary>;
 
@@ -123,4 +125,6 @@ export type QuickControl = z.infer<typeof quickControl>;
 /** Events pushed to the UI over SSE. */
 export type ServerEvent =
   | { type: "controller.updated"; controllerId: string }
-  | { type: "controller.removed"; controllerId: string };
+  | { type: "controller.removed"; controllerId: string }
+  | { type: "palettes.changed" }
+  | { type: "sync.completed"; controllerId: string };

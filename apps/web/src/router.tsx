@@ -5,6 +5,8 @@ import { useServerEvents } from "./queries";
 import { Dashboard } from "./pages/Dashboard";
 import { Controllers } from "./pages/Controllers";
 import { ControllerDetail } from "./pages/ControllerDetail";
+import { Palettes } from "./pages/Palettes";
+import { EditPalette, NewPalette } from "./pages/PaletteEditor";
 
 function HealthDot() {
   const { isSuccess } = useQuery({
@@ -69,7 +71,9 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: Dashboard }),
   createRoute({ getParentRoute: () => rootRoute, path: "/controllers", component: Controllers }),
   createRoute({ getParentRoute: () => rootRoute, path: "/controllers/$id", component: ControllerDetail }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/palettes", component: placeholder("Palettes") }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/palettes", component: Palettes }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/palettes/new", component: NewPalette }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/palettes/$id", component: EditPalette }),
   createRoute({ getParentRoute: () => rootRoute, path: "/presets", component: placeholder("Presets") }),
 ]);
 

@@ -13,7 +13,12 @@ import { startPoller } from "./poller.js";
 import { controllerRoutes } from "./routes/controllers.js";
 import { eventRoutes } from "./routes/events.js";
 import { healthRoutes } from "./routes/health.js";
+import { paletteRoutes } from "./routes/palettes.js";
+import { syncRoutes } from "./routes/sync.js";
 import { ControllerService, NotFoundError } from "./services/controllers.js";
+import { PaletteTools } from "./services/palette-tools.js";
+import { PaletteService } from "./services/palettes.js";
+import { SyncConflictError, SyncService } from "./sync/sync.js";
 import { WledError, type WledClientOptions } from "./wled/client.js";
 
 export interface AppOptions {
@@ -33,20 +38,28 @@ export async function buildApp({ db, webDist, logger = true, pollIntervalMs = 0,
   const events = new EventBus();
   app.decorate("db", db);
   app.decorate("events", events);
-  app.decorate("controllers", new ControllerService(db, events, wled));
+  const controllers = new ControllerService(db, events, wled);
+  const palettes = new PaletteService(db, events);
+  app.decorate("controllers", controllers);
+  app.decorate("palettes", palettes);
+  app.decorate("paletteTools", new PaletteTools(controllers));
+  app.decorate("sync", new SyncService(db, events, controllers, palettes));
 
   app.setErrorHandler((err, req, reply) => {
     if (hasZodFastifySchemaValidationErrors(err))
       return reply.code(400).send({ error: "Invalid request", issues: err.validation });
     if (err instanceof NotFoundError) return reply.code(404).send({ error: err.message });
+    if (err instanceof SyncConflictError) return reply.code(409).send({ error: err.message });
     // The device, not this server, failed: report it as a bad gateway with the device error.
-    if (err instanceof WledError) return reply.code(502).send({ error: err.message });
+    if (err instanceof WledError) return reply.code(err.status === 409 ? 409 : 502).send({ error: err.message });
     req.log.error(err);
     return reply.code(500).send({ error: "Internal server error" });
   });
 
   await app.register(healthRoutes, { prefix: "/api" });
   await app.register(controllerRoutes, { prefix: "/api" });
+  await app.register(paletteRoutes, { prefix: "/api" });
+  await app.register(syncRoutes, { prefix: "/api" });
   await app.register(eventRoutes, { prefix: "/api" });
 
   if (webDist && fs.existsSync(webDist)) {
@@ -75,5 +88,8 @@ declare module "fastify" {
     db: Db;
     events: EventBus;
     controllers: ControllerService;
+    palettes: PaletteService;
+    paletteTools: PaletteTools;
+    sync: SyncService;
   }
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `sync_state` ADD `written_palettes` text DEFAULT '{}' NOT NULL;

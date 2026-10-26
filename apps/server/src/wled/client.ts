@@ -12,6 +12,8 @@ export const wledInfo = z.looseObject({
   palcount: z.number().optional(),
   cpalcount: z.number().optional(),
   cpalmax: z.number().optional(),
+  /** Only reported by firmware that numbers custom palettes down from 200 (upstream WLED main). */
+  umpalcount: z.number().optional(),
   leds: z.looseObject({ count: z.number(), rgbw: z.boolean().optional() }),
 });
 export type WledInfo = z.infer<typeof wledInfo>;
@@ -21,6 +23,17 @@ export type WledFile = z.infer<typeof wledFile>;
 
 /** Firmware without cpalmax in /json/info (upstream 0.14/0.15) supports 10 custom palettes. */
 export const DEFAULT_CUSTOM_PALETTE_MAX = 10;
+
+/** True for firmware with the newer palette scheme: IDs 200 - N and the rmcpal command. */
+export const hasModernPalettes = (info: WledInfo) => info.umpalcount !== undefined;
+
+export const customPaletteBase = (info: WledInfo) => (hasModernPalettes(info) ? 200 : 255);
+
+const palxPage = z.object({
+  m: z.number(),
+  p: z.record(z.string(), z.array(z.union([z.string(), z.tuple([z.number(), z.number(), z.number(), z.number()])]))),
+});
+export type PalxPage = z.infer<typeof palxPage>;
 
 export class WledError extends Error {
   constructor(
@@ -87,6 +100,11 @@ export class WledClient {
     return z.array(z.string()).parse(await this.getJson("/json/fxdata"));
   }
 
+  /** One page of palette color previews from /json/palx; `m` is the last page number. */
+  async getPalx(page: number): Promise<PalxPage> {
+    return palxPage.parse(await this.getJson(`/json/palx?page=${page}`));
+  }
+
   async getPresets(): Promise<Record<string, Record<string, unknown>>> {
     return (await this.getFileJson("/presets.json")) ?? {};
   }
@@ -131,8 +149,29 @@ export class WledClient {
     return this.request("POST", "/upload", { body: form, parse: "text" });
   }
 
-  deleteFile(path: string): Promise<string> {
-    return this.request("DELETE", `/edit?path=${encodeURIComponent(path)}`, { parse: "text" });
+  /** Deletes a file. Current firmware uses GET /edit?func=delete; older builds take DELETE /edit. */
+  async deleteFile(path: string): Promise<void> {
+    const q = `path=${encodeURIComponent(path)}`;
+    try {
+      await this.request("GET", `/edit?func=delete&${q}`, { parse: "text" });
+    } catch (e) {
+      if (!(e instanceof WledError) || e.status === undefined) throw e;
+      await this.request("DELETE", `/edit?${q}`, { parse: "text" });
+    }
+  }
+
+  /**
+   * Removes /paletteN.json. Modern firmware has a command that also reloads palettes; on older firmware
+   * the file is deleted and the device keeps the palette in memory until palettes are reloaded
+   * (any palette upload triggers a reload).
+   */
+  async removeCustomPalette(slot: number, modern: boolean): Promise<{ reloaded: boolean }> {
+    if (modern) {
+      await this.setState({ rmcpal: slot });
+      return { reloaded: true };
+    }
+    await this.deleteFile(`/palette${slot}.json`);
+    return { reloaded: false };
   }
 
   // ---- Internals ----

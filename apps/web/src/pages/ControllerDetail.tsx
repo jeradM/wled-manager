@@ -10,6 +10,7 @@ import {
   useRefreshController,
   useUpdateController,
 } from "../queries";
+import { SyncCard } from "../components/SyncCard";
 import { Button, Card, ErrorText, Input, PageHeader, StatusDot, timeAgo } from "../components/ui";
 
 export function ControllerDetail() {
@@ -43,6 +44,7 @@ export function ControllerDetail() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <DeviceInfo c={c} />
         {c.status === "online" ? <QuickControls id={c.id} /> : <Card><p className="text-sm text-neutral-400">Controls are available when the controller is online.</p></Card>}
+        <SyncCard controllerId={c.id} online={c.status === "online"} />
         <Settings c={c} />
       </div>
     </div>
