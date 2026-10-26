@@ -18,7 +18,9 @@ CREATE TABLE `controllers` (
 	`info` text,
 	`effects` text,
 	`palettes` text,
+	`fxdata` text,
 	`last_seen` text,
+	`last_error` text,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL
 );

@@ -1,5 +1,6 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import type { PaletteStop, PresetState } from "@wled-manager/shared";
+import type { WledInfo } from "../wled/client.js";
 
 const timestamps = {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -14,11 +15,13 @@ export const controllers = sqliteTable("controllers", {
   pin: text("pin"),
   tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
   status: text("status", { enum: ["unknown", "online", "offline"] }).notNull().default("unknown"),
-  /** Cached /json/info, effect and palette name lists from the last refresh. */
-  info: text("info", { mode: "json" }).$type<Record<string, unknown>>(),
+  /** Cached /json/info, effect/palette name lists and effect metadata from the last refresh. */
+  info: text("info", { mode: "json" }).$type<WledInfo>(),
   effects: text("effects", { mode: "json" }).$type<string[]>(),
   palettes: text("palettes", { mode: "json" }).$type<string[]>(),
+  fxdata: text("fxdata", { mode: "json" }).$type<string[]>(),
   lastSeen: text("last_seen"),
+  lastError: text("last_error"),
   ...timestamps,
 });
 

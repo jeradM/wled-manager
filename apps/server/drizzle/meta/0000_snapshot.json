@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0fd70d6c-c96d-4afa-9e83-500a65a0795f",
+  "id": "01c4a7db-9384-4586-b3b0-8cc95b3e0718",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "controller_palette_slots": {
@@ -146,8 +146,22 @@
           "notNull": false,
           "autoincrement": false
         },
+        "fxdata": {
+          "name": "fxdata",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "last_seen": {
           "name": "last_seen",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_error": {
+          "name": "last_error",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

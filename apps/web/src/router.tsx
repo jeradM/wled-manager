@@ -1,6 +1,10 @@
 import { Link, Outlet, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
+import { useServerEvents } from "./queries";
+import { Dashboard } from "./pages/Dashboard";
+import { Controllers } from "./pages/Controllers";
+import { ControllerDetail } from "./pages/ControllerDetail";
 
 function HealthDot() {
   const { isSuccess } = useQuery({
@@ -23,8 +27,9 @@ const nav = [
   { to: "/presets", label: "Presets" },
 ] as const;
 
-const rootRoute = createRootRoute({
-  component: () => (
+function Root() {
+  useServerEvents();
+  return (
     <div className="min-h-screen">
       <header className="flex items-center justify-between border-b border-neutral-800 px-6 py-3">
         <div className="flex items-center gap-6">
@@ -48,8 +53,10 @@ const rootRoute = createRootRoute({
         <Outlet />
       </main>
     </div>
-  ),
-});
+  );
+}
+
+const rootRoute = createRootRoute({ component: Root });
 
 const placeholder = (title: string) => () => (
   <div>
@@ -59,8 +66,9 @@ const placeholder = (title: string) => () => (
 );
 
 const routeTree = rootRoute.addChildren([
-  createRoute({ getParentRoute: () => rootRoute, path: "/", component: placeholder("Dashboard") }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/controllers", component: placeholder("Controllers") }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/", component: Dashboard }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/controllers", component: Controllers }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/controllers/$id", component: ControllerDetail }),
   createRoute({ getParentRoute: () => rootRoute, path: "/palettes", component: placeholder("Palettes") }),
   createRoute({ getParentRoute: () => rootRoute, path: "/presets", component: placeholder("Presets") }),
 ]);

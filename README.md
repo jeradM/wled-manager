@@ -20,6 +20,14 @@ After changing `apps/server/src/db/schema.ts`, generate a migration:
 mise exec -- pnpm --filter @wled-manager/server db:generate
 ```
 
+## Configuration
+
+| Env var | Default | |
+|---|---|---|
+| `PORT` | `8080` | HTTP port |
+| `DATA_DIR` | `./data` | SQLite location |
+| `POLL_INTERVAL_MS` | `30000` | Controller status poll interval (`0` disables) |
+
 ## Docker
 
 ```sh

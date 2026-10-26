@@ -85,11 +85,42 @@ export type ControllerInput = z.infer<typeof controllerInput>;
 export const controllerStatus = z.enum(["unknown", "online", "offline"]);
 export type ControllerStatus = z.infer<typeof controllerStatus>;
 
-export const controller = controllerInput.extend({
+export const controllerUpdate = controllerInput.partial();
+export type ControllerUpdate = z.infer<typeof controllerUpdate>;
+
+/** Summary of the device's /json/info, captured at the last successful poll. */
+export const deviceSummary = z.object({
+  version: z.string(),
+  product: z.string().nullable(),
+  arch: z.string().nullable(),
+  mac: z.string().nullable(),
+  ledCount: z.number().int(),
+  rgbw: z.boolean(),
+  effectCount: z.number().int(),
+  customPaletteCount: z.number().int(),
+  customPaletteMax: z.number().int(),
+});
+export type DeviceSummary = z.infer<typeof deviceSummary>;
+
+export const controller = controllerInput.omit({ pin: true }).extend({
   id: z.string(),
+  hasPin: z.boolean(),
   status: controllerStatus,
-  version: z.string().nullable(),
-  ledCount: z.number().int().nullable(),
+  device: deviceSummary.nullable(),
   lastSeen: z.string().nullable(),
+  lastError: z.string().nullable(),
 });
 export type Controller = z.infer<typeof controller>;
+
+/** Live control subset sent to a device from the UI. */
+export const quickControl = z.object({
+  on: z.boolean().optional(),
+  bri: byte.optional(),
+  ps: z.number().int().min(1).max(250).optional(),
+});
+export type QuickControl = z.infer<typeof quickControl>;
+
+/** Events pushed to the UI over SSE. */
+export type ServerEvent =
+  | { type: "controller.updated"; controllerId: string }
+  | { type: "controller.removed"; controllerId: string };
