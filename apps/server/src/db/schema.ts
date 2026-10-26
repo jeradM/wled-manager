@@ -40,7 +40,11 @@ export const presets = sqliteTable("presets", {
   slot: integer("slot").notNull().unique(),
   name: text("name").notNull(),
   ql: text("ql"),
-  state: text("state", { mode: "json" }).$type<PresetState>().notNull(),
+  kind: text("kind", { enum: ["state", "raw"] }).notNull().default("state"),
+  /** Set for "state" presets. */
+  state: text("state", { mode: "json" }).$type<PresetState>(),
+  /** Set for "raw" presets: the device preset JSON without n/ql. */
+  raw: text("raw", { mode: "json" }).$type<Record<string, unknown>>(),
   revision: integer("revision").notNull().default(1),
   ...timestamps,
 });
@@ -82,6 +86,8 @@ export const syncState = sqliteTable("sync_state", {
   drifted: integer("drifted", { mode: "boolean" }).notNull().default(false),
   /** Palette files as last written by the manager: slot -> normalized contents (paletteKey). */
   writtenPalettes: text("written_palettes", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+  /** Presets as last written by the manager: slot -> canonical JSON. */
+  writtenPresets: text("written_presets", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
   lastError: text("last_error"),
   lastSyncedAt: text("last_synced_at"),
 });

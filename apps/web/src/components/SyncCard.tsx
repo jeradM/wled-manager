@@ -1,4 +1,5 @@
-import type { ChangeAction } from "@wled-manager/shared";
+import { useState } from "react";
+import type { ChangeAction, SyncPlan } from "@wled-manager/shared";
 import { usePalettes, useSync, useSyncPlan } from "../queries";
 import { GradientSwatch } from "./GradientEditor";
 import { Button, Card, ErrorText } from "./ui";
@@ -16,15 +17,20 @@ export function SyncCard({ controllerId, online }: { controllerId: string; onlin
   const { data: palettes = [] } = usePalettes();
   const sync = useSync();
 
-  const foreign = plan?.palettes.filter((c) => c.replacesUnmanaged) ?? [];
-  const deletions = plan?.palettes.filter((c) => c.action === "delete").length ?? 0;
+  const foreignPalettes = plan?.palettes.filter((c) => c.replacesUnmanaged) ?? [];
+  const foreignPresets = plan?.presets.filter((c) => c.replacesUnmanaged) ?? [];
+  const foreign = [...foreignPalettes, ...foreignPresets];
+  const deletions = [...(plan?.palettes ?? []), ...(plan?.presets ?? [])].filter((c) => c.action === "delete").length;
   const apply = () => {
     const message = foreign.length
-      ? `${foreign.length} palette(s) on this controller weren't created by WLED Manager and will be overwritten or removed:\n` +
-        foreign.map((c) => `  ${c.path} (palette ${c.deviceId})`).join("\n") +
-        "\n\nContinue?"
+      ? `These items on the controller weren't written by WLED Manager (or were changed since) and will be overwritten or removed:\n` +
+        [
+          ...foreignPalettes.map((c) => `  palette ${c.path}`),
+          ...foreignPresets.map((c) => `  preset ${c.slot}: ${c.name}`),
+        ].join("\n") +
+        "\n\nImport them first if you want to keep them. Continue?"
       : deletions
-        ? `This removes ${deletions} palette file(s) from the controller. Continue?`
+        ? `This removes ${deletions} item(s) from the controller. Continue?`
         : null;
     if (message && !confirm(message)) return;
     sync.mutate(controllerId);
@@ -52,12 +58,14 @@ export function SyncCard({ controllerId, online }: { controllerId: string; onlin
       <ErrorText error={error ?? sync.error} />
       {foreign.length > 0 && (
         <p className="mb-2 rounded bg-red-950/50 px-2 py-1 text-xs text-red-300">
-          {foreign.length} palette(s) on this controller weren't created by WLED Manager. Syncing replaces them.
+          {foreign.length} item(s) on this controller weren't written by WLED Manager. Syncing replaces them; import them first
+          to keep them.
         </p>
       )}
       {plan?.warnings.map((w) => (
         <p key={w} className="mb-2 rounded bg-amber-950/50 px-2 py-1 text-xs text-amber-300">{w}</p>
       ))}
+      {plan && <h3 className="mt-2 mb-1 text-xs font-medium tracking-wide text-neutral-400 uppercase">Palettes</h3>}
       {plan && (
         <table className="w-full text-left text-sm">
           <thead className="text-xs text-neutral-500">
@@ -95,6 +103,46 @@ export function SyncCard({ controllerId, online }: { controllerId: string; onlin
           </tbody>
         </table>
       )}
+      {plan && <PresetChanges plan={plan} />}
     </Card>
+  );
+}
+
+function PresetChanges({ plan }: { plan: SyncPlan }) {
+  const [showUnchanged, setShowUnchanged] = useState(false);
+  const changed = plan.presets.filter((c) => c.action !== "unchanged" || c.warnings);
+  const rows = showUnchanged ? plan.presets : changed;
+  return (
+    <>
+      <div className="mt-4 mb-1 flex items-center justify-between">
+        <h3 className="text-xs font-medium tracking-wide text-neutral-400 uppercase">Presets</h3>
+        <label className="flex items-center gap-1.5 text-xs text-neutral-500">
+          <input type="checkbox" checked={showUnchanged} onChange={(e) => setShowUnchanged(e.target.checked)} />
+          Show unchanged ({plan.presets.length - changed.length})
+        </label>
+      </div>
+      <table className="w-full text-left text-sm">
+        <tbody className="divide-y divide-neutral-800">
+          {rows.length === 0 && (
+            <tr><td className="py-2 text-neutral-500">{plan.presets.length ? "No preset changes." : "No presets in the library or on the controller."}</td></tr>
+          )}
+          {rows.map((c) => (
+            <tr key={c.slot}>
+              <td className="w-12 py-1.5 text-neutral-400">{c.slot}</td>
+              <td className="py-1.5">
+                {c.name}
+                {c.warnings?.map((w) => (
+                  <div key={w} className="text-xs text-amber-400">{w}</div>
+                ))}
+              </td>
+              <td className="py-1.5 text-right">
+                {c.replacesUnmanaged && <span className="mr-1.5 text-xs text-red-400">not from WLED Manager</span>}
+                <span className={`rounded px-1.5 py-0.5 text-xs ${actionStyle[c.action]}`}>{c.action}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }

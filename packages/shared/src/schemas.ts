@@ -23,48 +23,83 @@ export type Palette = z.infer<typeof palette>;
 
 // ---- Presets ----
 
-/** A preset points at a WLED built-in palette by ID, or at a library palette resolved per device at sync time. */
-export const paletteRef = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("builtin"), id: z.number().int().min(0).max(245) }),
-  z.object({ kind: z.literal("custom"), paletteId: z.string() }),
+/** WLED color: [r, g, b] or [r, g, b, w]. WLED also accepts "rrggbb" hex strings. */
+export const wledColor = z.union([
+  z.tuple([byte, byte, byte]),
+  z.tuple([byte, byte, byte, byte]),
+  z.string(),
 ]);
+export type WledColor = z.infer<typeof wledColor>;
+
+/**
+ * A segment's palette: a WLED palette ID (built-in, or a device custom palette the library doesn't
+ * know about), or a library palette resolved to the right device ID at sync time.
+ */
+export const paletteRef = z.union([z.number().int().min(0).max(255), z.object({ paletteId: z.string() })]);
 export type PaletteRef = z.infer<typeof paletteRef>;
 
-export const segment = z.object({
+/**
+ * A preset segment. Only the fields the editor understands are typed; everything else WLED stores
+ * (grp, spc, of, rev, mi, cct, n, ...) is kept as-is. All fields are optional, as in WLED itself.
+ */
+export const segment = z.looseObject({
+  id: z.number().int().optional(),
   start: z.number().int().min(0).optional(),
   stop: z.number().int().min(0).optional(),
-  fx: z.number().int().min(0),
+  on: z.boolean().optional(),
+  bri: byte.optional(),
+  fx: z.number().int().min(0).optional(),
+  /** Effect name when the preset was saved, used to match effects across firmware versions. */
   fxName: z.string().optional(),
-  sx: byte.default(128),
-  ix: byte.default(128),
-  c1: byte.default(128),
-  c2: byte.default(128),
-  c3: z.number().int().min(0).max(31).default(16),
-  o1: z.boolean().default(false),
-  o2: z.boolean().default(false),
-  o3: z.boolean().default(false),
-  col: z.tuple([hexColor, hexColor, hexColor]),
-  pal: paletteRef,
+  sx: byte.optional(),
+  ix: byte.optional(),
+  c1: byte.optional(),
+  c2: byte.optional(),
+  c3: byte.optional(),
+  o1: z.boolean().optional(),
+  o2: z.boolean().optional(),
+  o3: z.boolean().optional(),
+  col: z.array(wledColor).max(3).optional(),
+  pal: paletteRef.optional(),
 });
 export type Segment = z.infer<typeof segment>;
 
-export const presetState = z.object({
-  on: z.boolean().default(true),
-  bri: byte.default(128),
-  transition: z.number().int().min(0).max(65535).default(7),
-  seg: z.array(segment).min(1).max(32),
+export const presetState = z.looseObject({
+  on: z.boolean().optional(),
+  bri: byte.optional(),
+  transition: z.number().int().min(0).max(65535).optional(),
+  mainseg: z.number().int().optional(),
+  seg: z.array(segment).max(32),
 });
 export type PresetState = z.infer<typeof presetState>;
 
-export const presetInput = z.object({
+/**
+ * "state" presets are structured light states the editor can work with. "raw" presets hold any other
+ * WLED preset verbatim: API-command presets ("win"), per-LED presets (seg.i), playlists, etc.
+ */
+export const presetKind = z.enum(["state", "raw"]);
+export type PresetKind = z.infer<typeof presetKind>;
+
+const presetFields = {
   slot: z.number().int().min(1).max(250),
   name: z.string().min(1).max(64),
-  ql: z.string().max(2).optional(),
-  state: presetState,
-});
+  /** Quick-load label shown on WLED's preset buttons. */
+  ql: z.string().max(8).optional(),
+  kind: presetKind,
+  state: presetState.optional(),
+  raw: z.record(z.string(), z.unknown()).optional(),
+};
+
+const hasPayload = (p: { kind: PresetKind; state?: unknown; raw?: unknown }) =>
+  p.kind === "state" ? p.state !== undefined : p.raw !== undefined;
+
+export const presetInput = z
+  .object(presetFields)
+  .refine(hasPayload, { message: "state presets need `state`, raw presets need `raw`" });
 export type PresetInput = z.infer<typeof presetInput>;
 
-export const preset = presetInput.extend({
+export const preset = z.object({
+  ...presetFields,
   id: z.string(),
   revision: z.number().int(),
   updatedAt: z.string(),
@@ -127,4 +162,5 @@ export type ServerEvent =
   | { type: "controller.updated"; controllerId: string }
   | { type: "controller.removed"; controllerId: string }
   | { type: "palettes.changed" }
+  | { type: "presets.changed" }
   | { type: "sync.completed"; controllerId: string };

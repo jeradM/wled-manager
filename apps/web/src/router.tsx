@@ -7,6 +7,8 @@ import { Controllers } from "./pages/Controllers";
 import { ControllerDetail } from "./pages/ControllerDetail";
 import { Palettes } from "./pages/Palettes";
 import { EditPalette, NewPalette } from "./pages/PaletteEditor";
+import { Presets } from "./pages/Presets";
+import { EditPreset, NewPreset } from "./pages/PresetEditor";
 
 function HealthDot() {
   const { isSuccess } = useQuery({
@@ -60,13 +62,6 @@ function Root() {
 
 const rootRoute = createRootRoute({ component: Root });
 
-const placeholder = (title: string) => () => (
-  <div>
-    <h1 className="text-xl font-semibold">{title}</h1>
-    <p className="mt-2 text-sm text-neutral-400">Coming soon.</p>
-  </div>
-);
-
 const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: Dashboard }),
   createRoute({ getParentRoute: () => rootRoute, path: "/controllers", component: Controllers }),
@@ -74,7 +69,9 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/palettes", component: Palettes }),
   createRoute({ getParentRoute: () => rootRoute, path: "/palettes/new", component: NewPalette }),
   createRoute({ getParentRoute: () => rootRoute, path: "/palettes/$id", component: EditPalette }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/presets", component: placeholder("Presets") }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/presets", component: Presets }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/presets/new", component: NewPreset }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/presets/$id", component: EditPreset }),
 ]);
 
 export const router = createRouter({ routeTree });

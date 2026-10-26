@@ -10,6 +10,7 @@ import {
   useRefreshController,
   useUpdateController,
 } from "../queries";
+import { ImportPanel } from "../components/ImportPanel";
 import { SyncCard } from "../components/SyncCard";
 import { Button, Card, ErrorText, Input, PageHeader, StatusDot, timeAgo } from "../components/ui";
 
@@ -19,6 +20,7 @@ export function ControllerDetail() {
   const refresh = useRefreshController();
   const del = useDeleteController();
   const navigate = useNavigate();
+  const [importing, setImporting] = useState(false);
 
   if (error) return <ErrorText error={error} />;
   if (!c) return null;
@@ -34,6 +36,9 @@ export function ControllerDetail() {
         title={c.name}
         actions={
           <>
+            <Button onClick={() => setImporting(true)} disabled={importing || c.status !== "online"}>
+              Import from controller
+            </Button>
             <Button onClick={() => refresh.mutate(c.id)} disabled={refresh.isPending}>
               {refresh.isPending ? "Refreshing…" : "Refresh"}
             </Button>
@@ -44,6 +49,7 @@ export function ControllerDetail() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <DeviceInfo c={c} />
         {c.status === "online" ? <QuickControls id={c.id} /> : <Card><p className="text-sm text-neutral-400">Controls are available when the controller is online.</p></Card>}
+        {importing && <ImportPanel controllerId={c.id} onClose={() => setImporting(false)} />}
         <SyncCard controllerId={c.id} online={c.status === "online"} />
         <Settings c={c} />
       </div>
