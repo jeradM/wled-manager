@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "@tanstack/react-router";
-import type { LedLayout, LedMarker } from "@wled-manager/shared";
+import { indicesToSpans, type LedLayout, type LedMarker, type LedRange, type LedSpan } from "@wled-manager/shared";
 import { useController, useUpdateController } from "../queries";
 import { LedMap } from "../components/locator/LedMap";
 import { useLocator } from "../components/locator/useLocator";
 import { Button, Card, ErrorText, PageHeader } from "../components/ui";
 
 const COLORS = ["#ffffff", "#ff0000", "#00ff00", "#0000ff", "#ff00ff"];
+
+/** "10–39, 50" for a list of runs. */
+const describeSpans = (spans: LedSpan[]) =>
+  spans.map((s) => (s.stop - s.start > 1 ? `${s.start}–${s.stop - 1}` : `${s.start}`)).join(", ");
 
 export function Locator() {
   const { id } = useParams({ from: "/controllers/$id/locate" });
@@ -20,6 +24,9 @@ export function Locator() {
   const count = c?.device?.ledCount ?? 0;
   const layout = c?.layout;
   const markers = c?.markers ?? [];
+  const ranges = c?.ranges ?? [];
+  const spans = useMemo(() => indicesToSpans(loc.selection), [loc.selection]);
+  const multiple = loc.selection.size > 1;
 
   const step = (delta: number) => {
     if (!count) return;
@@ -39,6 +46,7 @@ export function Locator() {
         ArrowUp: () => step(-n),
         Home: () => loc.select(0),
         End: () => loc.select(count - 1),
+        Escape: () => loc.clear(),
       };
       if (moves[e.key]) {
         e.preventDefault();
@@ -51,19 +59,18 @@ export function Locator() {
 
   const setLayout = (patch: Partial<LedLayout>) => layout && update.mutate({ layout: { ...layout, ...patch } });
   const setMarkers = (next: LedMarker[]) => update.mutate({ markers: next });
+  const setRanges = (next: LedRange[]) => update.mutate({ ranges: next });
 
-  const addMarker = (e: FormEvent) => {
+  // One selected LED is labelled as a marker; several as a range (replacing a range with the same label).
+  const addLabel = (e: FormEvent) => {
     e.preventDefault();
-    if (loc.index === null || !label.trim()) return;
-    setMarkers([...markers.filter((m) => m.index !== loc.index), { index: loc.index, label: label.trim() }]);
+    const text = label.trim();
+    if (!text || !spans.length) return;
+    if (multiple) setRanges([...ranges.filter((r) => r.label !== text), { label: text, spans }]);
+    else setMarkers([...markers.filter((m) => m.index !== spans[0]!.start), { index: spans[0]!.start, label: text }]);
     setLabel("");
   };
 
-  // Each marker starts a range that runs to the LED before the next marker.
-  const ranges = useMemo(
-    () => markers.map((m, i) => ({ ...m, end: (markers[i + 1]?.index ?? count) - 1 })),
-    [markers, count],
-  );
 
   if (!c) return null;
   if (!c.device || c.status !== "online")
@@ -95,10 +102,12 @@ export function Locator() {
           <div className="min-w-40">
             <div className="text-xs text-neutral-500">{loc.active ? "Lit on the controller" : "Click an LED to start"}</div>
             <div className="text-2xl font-semibold tabular-nums">
-              {loc.index === null ? "–" : `LED ${loc.index}`}
+              {multiple ? `${loc.selection.size} LEDs` : loc.index === null ? "–" : `LED ${loc.index}`}
               <span className="ml-2 text-sm font-normal text-neutral-500">of {count}</span>
             </div>
-            <div className="h-4 text-xs text-amber-400">{marker?.label}</div>
+            <div className="h-4 max-w-72 truncate text-xs text-amber-400">
+              {multiple ? describeSpans(spans) : marker?.label}
+            </div>
           </div>
           <div className="flex gap-1">
             <Button onClick={() => step(-10)} title="Back 10 (Shift+←)">−10</Button>
@@ -138,7 +147,7 @@ export function Locator() {
               />
             ))}
           </div>
-          <span className="text-xs text-neutral-500">{loc.busy ? "Sending…" : "← → to step, Shift for 10"}</span>
+          <span className="text-xs text-neutral-500">{loc.busy ? "Sending…" : "← → to step, Shift for 10, Esc to clear"}</span>
         </div>
         <ErrorText error={loc.error} />
         {loc.active && (
@@ -150,7 +159,20 @@ export function Locator() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_18rem]">
         <Card>
-          <LedMap count={count} layout={layout!} markers={markers} current={loc.index} color={color} onSelect={loc.select} />
+          <LedMap
+            count={count}
+            layout={layout!}
+            markers={markers}
+            ranges={ranges}
+            current={loc.index}
+            selected={loc.selection}
+            color={color}
+            onSelect={loc.select}
+          />
+          <p className="mt-2 text-xs text-neutral-500">
+            Click an LED to light it. Shift-click selects the run from the last click; Ctrl/⌘-click adds or removes one
+            LED; Ctrl/⌘-Shift-click adds a run.
+          </p>
         </Card>
 
         <div className="flex flex-col gap-4">
@@ -191,29 +213,56 @@ export function Locator() {
           </Card>
 
           <Card className="flex flex-col gap-3 text-sm">
-            <h2 className="font-medium">Markers</h2>
-            <form onSubmit={addMarker} className="flex gap-1">
+            <h2 className="font-medium">Labels</h2>
+            <form onSubmit={addLabel} className="flex gap-1">
               <input
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
-                placeholder={loc.index === null ? "Select an LED first" : `Label for LED ${loc.index}`}
-                disabled={loc.index === null}
+                placeholder={
+                  !spans.length ? "Select LEDs first" : multiple ? `Name these ${loc.selection.size} LEDs` : `Label for LED ${spans[0]!.start}`
+                }
+                disabled={!spans.length}
                 maxLength={40}
                 className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
               />
-              <Button type="submit" disabled={loc.index === null || !label.trim()}>Mark</Button>
+              <Button type="submit" disabled={!spans.length || !label.trim()}>{multiple ? "Save range" : "Mark"}</Button>
             </form>
-            {ranges.length === 0 ? (
-              <p className="text-xs text-neutral-500">
-                Label positions like corners or the start of a run. Build segments between markers on the Segments page.
-              </p>
-            ) : (
+            <p className="text-xs text-neutral-500">
+              One LED becomes a marker; several become a range. Ranges and markers can be used to build segments.
+            </p>
+            {ranges.length > 0 && (
+              <>
+                <h3 className="text-xs font-medium tracking-wide text-neutral-400 uppercase">Ranges</h3>
+                <ul className="flex flex-col divide-y divide-neutral-800">
+                  {ranges.map((r) => (
+                    <li key={r.label} className="flex items-center justify-between gap-2 py-1">
+                      <button type="button" onClick={() => loc.selectSpans(r.spans)} className="min-w-0 text-left hover:text-sky-400">
+                        <span className="block truncate">{r.label}</span>
+                        <span className="text-xs text-neutral-500">LEDs {describeSpans(r.spans)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Remove range ${r.label}`}
+                        onClick={() => setRanges(ranges.filter((x) => x.label !== r.label))}
+                        className="text-neutral-500 hover:text-red-400"
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {markers.length > 0 && (
+              <h3 className="text-xs font-medium tracking-wide text-neutral-400 uppercase">Markers</h3>
+            )}
+            {markers.length > 0 && (
               <ul className="flex flex-col divide-y divide-neutral-800">
-                {ranges.map((m) => (
+                {markers.map((m) => (
                   <li key={m.index} className="flex items-center justify-between gap-2 py-1">
                     <button type="button" onClick={() => loc.select(m.index)} className="min-w-0 text-left hover:text-sky-400">
                       <span className="block truncate">{m.label}</span>
-                      <span className="text-xs text-neutral-500">LED {m.index}{m.end > m.index ? `–${m.end}` : ""}</span>
+                      <span className="text-xs text-neutral-500">LED {m.index}</span>
                     </button>
                     <button
                       type="button"

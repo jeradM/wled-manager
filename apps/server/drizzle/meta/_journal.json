@@ -43,6 +43,13 @@
       "when": 1793063131790,
       "tag": "0005_segment_plan",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793111526204,
+      "tag": "0006_led_ranges",
+      "breakpoints": true
     }
   ]
 }

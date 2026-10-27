@@ -99,7 +99,7 @@ describe("controllers API", () => {
     expect(res.json<Controller>()).toMatchObject({ name: "Porch", port: mock.port, tags: ["outdoor"] });
   });
 
-  it("stores a segment plan and reports the segment limit", async () => {
+  it("stores ranges and a segment plan and reports the segment limit", async () => {
     const c = (await add({ name: "Porch", host: mock.host, port: mock.port })).json<Controller>();
     expect(c.segmentPlan).toEqual([]);
     expect(c.device?.maxSegments).toBe(32);
@@ -107,8 +107,18 @@ describe("controllers API", () => {
       { name: "Roof", start: "A", end: { type: "marker", label: "B", includeEnd: false } },
       { start: "B", end: { type: "length", count: -10 } },
     ];
-    const res = await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: { segmentPlan } });
-    expect(res.json<Controller>().segmentPlan).toEqual(segmentPlan);
+    const ranges = [{ label: "Posts", spans: [{ start: 2, stop: 5 }, { start: 8, stop: 9 }] }];
+    const res = await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: { segmentPlan, ranges } });
+    expect(res.json<Controller>()).toMatchObject({ segmentPlan, ranges });
+    const fromRange = [{ range: "Posts", span: 1, reverse: true, grp: 2, spc: 1 }];
+    const res2 = await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: { segmentPlan: fromRange } });
+    expect(res2.json<Controller>().segmentPlan).toEqual(fromRange);
+    const emptySpan = await t.app.inject({
+      method: "PATCH",
+      url: `/api/controllers/${c.id}`,
+      payload: { ranges: [{ label: "x", spans: [{ start: 4, stop: 4 }] }] },
+    });
+    expect(emptySpan.statusCode).toBe(400);
     const bad = await t.app.inject({
       method: "PATCH",
       url: `/api/controllers/${c.id}`,

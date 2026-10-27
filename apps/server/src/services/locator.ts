@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
+import type { LedSpan } from "@wled-manager/shared";
 import type { ControllerService } from "./controllers.js";
 import { WledError } from "../wled/client.js";
 
@@ -64,14 +65,17 @@ export class LocatorService {
     return { ledCount };
   }
 
-  /** Lights LED `index` in `color` ("rrggbb"); every other LED is off. */
-  async show(controllerId: string, index: number, color: string): Promise<void> {
+  /** Lights the LEDs in `spans` in `color` ("rrggbb"); every other LED is off. */
+  async show(controllerId: string, spans: LedSpan[], color: string): Promise<void> {
     const session = this.sessions.get(controllerId);
     if (!session) throw new WledError("No locator session is running for this controller", 409);
-    if (index < 0 || index >= session.ledCount) throw new WledError(`LED ${index} is out of range (0–${session.ledCount - 1})`, 409);
+    const outside = spans.find((s) => s.stop > session.ledCount);
+    if (outside) throw new WledError(`LED ${outside.stop - 1} is out of range (0–${session.ledCount - 1})`, 409);
     this.touch(controllerId, session);
+    const hex = color.replace(/^#/, "");
+    // seg.i takes [start, stop, color] runs; blank the whole strip first.
     await this.client(controllerId).setState({
-      seg: { id: 0, i: [0, session.ledCount, "000000", index, color.replace(/^#/, "")] },
+      seg: { id: 0, i: [0, session.ledCount, "000000", ...spans.flatMap((s) => [s.start, s.stop, hex])] },
     });
   }
 

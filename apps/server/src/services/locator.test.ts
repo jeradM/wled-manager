@@ -55,6 +55,16 @@ describe("LED locator", () => {
     expect((await t.app.inject({ method: "GET", url: `/api/controllers/${c.id}/locate` })).json()).toEqual({ active: false });
   });
 
+  it("lights several runs of LEDs at once", async () => {
+    await post("/start");
+    await post("", { spans: [{ start: 2, stop: 5 }, { start: 10, stop: 12 }], color: "0000ff" });
+    const lit = mock.pixels().flatMap((p, i) => (p === "0000ff" ? [i] : []));
+    expect(lit).toEqual([2, 3, 4, 10, 11]);
+    expect(mock.pixels().filter((p) => p !== "000000")).toHaveLength(5);
+    expect((await post("", { spans: [{ start: 18, stop: 21 }], color: "0000ff" })).statusCode).toBe(409);
+    expect((await post("", { color: "0000ff" })).statusCode).toBe(400);
+  });
+
   it("rejects LEDs out of range and requests without a session", async () => {
     expect((await post("", { index: 1, color: "ffffff" })).statusCode).toBe(409);
     await post("/start");

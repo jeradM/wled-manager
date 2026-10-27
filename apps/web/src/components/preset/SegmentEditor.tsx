@@ -7,7 +7,7 @@ import { PalettePicker } from "./PalettePicker";
 import { ALL_CONTROLS, parseFxData } from "./fxdata";
 import { BLEND_MODES } from "./wled-options";
 
-const TYPED_KEYS = new Set(["id", "start", "stop", "on", "bri", "fx", "fxName", "sx", "ix", "c1", "c2", "c3", "o1", "o2", "o3", "col", "pal", "bm"]);
+const TYPED_KEYS = new Set(["id", "start", "stop", "on", "bri", "fx", "fxName", "sx", "ix", "c1", "c2", "c3", "o1", "o2", "o3", "col", "pal", "bm", "grp", "spc", "of"]);
 
 interface Props {
   index: number;
@@ -79,6 +79,30 @@ export function SegmentEditor({ index, segment: s, catalog, library, rgbw, marke
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
           />
         </label>
+        <NumberField
+          label="Grouping"
+          title="LEDs that show the same pixel, so the effect looks coarser"
+          value={s.grp}
+          min={1}
+          max={255}
+          onChange={(grp) => set({ grp })}
+        />
+        <NumberField
+          label="Spacing"
+          title="LEDs left off after each group"
+          value={s.spc}
+          min={0}
+          max={255}
+          onChange={(spc) => set({ spc })}
+        />
+        <NumberField
+          label="Offset"
+          title="Shifts the effect along the segment by this many pixels"
+          value={s.of}
+          min={0}
+          max={65535}
+          onChange={(of) => set({ of })}
+        />
         <datalist id={markerList}>
           {markers.map((m) => (
             <option key={m.index} value={m.index}>{m.label}</option>
@@ -172,5 +196,39 @@ export function SegmentEditor({ index, segment: s, catalog, library, rgbw, marke
         <p className="mt-3 text-xs text-neutral-500">Also kept as-is: {extraKeys.join(", ")}</p>
       )}
     </div>
+  );
+}
+
+/** Number input where empty means "leave the controller's value alone". */
+function NumberField({
+  label,
+  title,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  title: string;
+  value: number | undefined;
+  min: number;
+  max: number;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1" title={title}>
+      <span className="text-xs text-neutral-400">{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value ?? ""}
+        placeholder="keep"
+        onChange={(e) =>
+          onChange(e.target.value.trim() === "" ? undefined : Math.min(max, Math.max(min, Math.round(Number(e.target.value)) || min)))
+        }
+        className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
+      />
+    </label>
   );
 }

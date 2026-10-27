@@ -63,6 +63,12 @@ export const segment = z.looseObject({
   pal: paletteRef.optional(),
   /** How the segment is blended with segments below it (newer firmware). */
   bm: z.number().int().min(0).max(255).optional(),
+  /** Grouping: LEDs that show the same pixel. */
+  grp: z.number().int().min(1).max(255).optional(),
+  /** Spacing: LEDs left off after each group. */
+  spc: z.number().int().min(0).max(255).optional(),
+  /** Offset: shifts the effect along the segment. */
+  of: z.number().int().min(0).max(65535).optional(),
 });
 export type Segment = z.infer<typeof segment>;
 
@@ -130,23 +136,51 @@ export const DEFAULT_LED_LAYOUT: LedLayout = { type: "strip", columns: 50, serpe
 export const ledMarker = z.object({ index: z.number().int().min(0), label: z.string().min(1).max(40) });
 export type LedMarker = z.infer<typeof ledMarker>;
 
-/**
- * A planned segment: it starts at a marker or an LED number and ends at another marker, an LED number, or
- * after a number of LEDs. Markers are referenced by label so moving a marker moves the segments built on it.
- */
-export const segmentPlanEntry = z.object({
+/** A run of LEDs: start..stop-1, as in WLED segments. */
+export const ledSpan = z
+  .object({ start: z.number().int().min(0), stop: z.number().int().min(1) })
+  .refine((s) => s.stop > s.start, { message: "stop must be after start" });
+export type LedSpan = z.infer<typeof ledSpan>;
+
+/** A labelled selection of LEDs, e.g. "roofline", made with the locator. It may have several runs. */
+export const ledRange = z.object({ label: z.string().min(1).max(40), spans: z.array(ledSpan).min(1).max(64) });
+export type LedRange = z.infer<typeof ledRange>;
+
+/** Grouping, spacing and offset for a planned segment; unset means 1, 0 and 0. */
+const planLayoutFields = {
   name: z.string().max(32).optional(),
-  /** A marker label, or an LED number. */
-  start: z.union([z.string().min(1), z.number().int().min(0)]),
-  end: z.discriminatedUnion("type", [
-    /** Runs towards the marker; includeEnd also lights the marker's own LED. */
-    z.object({ type: z.literal("marker"), label: z.string().min(1), includeEnd: z.boolean() }),
-    /** Runs towards the LED; includeEnd also lights that LED. */
-    z.object({ type: z.literal("led"), index: z.number().int().min(0), includeEnd: z.boolean() }),
-    /** Covers |count| LEDs from the start LED; a negative count runs backwards. */
-    z.object({ type: z.literal("length"), count: z.number().int().min(-10000).max(10000) }),
-  ]),
-});
+  grp: z.number().int().min(1).max(255).optional(),
+  spc: z.number().int().min(0).max(255).optional(),
+  of: z.number().int().min(0).max(65535).optional(),
+};
+
+/**
+ * A planned segment. It covers one run of a labelled range, or it starts at a marker or an LED number and
+ * ends at another marker, an LED number, or after a number of LEDs. Markers and ranges are referenced by
+ * label so moving them moves the segments built on them.
+ */
+export const segmentPlanEntry = z.union([
+  z.object({
+    ...planLayoutFields,
+    range: z.string().min(1),
+    /** Which run of the range, for ranges with several. */
+    span: z.number().int().min(0),
+    reverse: z.boolean(),
+  }),
+  z.object({
+    ...planLayoutFields,
+    /** A marker label, or an LED number. */
+    start: z.union([z.string().min(1), z.number().int().min(0)]),
+    end: z.discriminatedUnion("type", [
+      /** Runs towards the marker; includeEnd also lights the marker's own LED. */
+      z.object({ type: z.literal("marker"), label: z.string().min(1), includeEnd: z.boolean() }),
+      /** Runs towards the LED; includeEnd also lights that LED. */
+      z.object({ type: z.literal("led"), index: z.number().int().min(0), includeEnd: z.boolean() }),
+      /** Covers |count| LEDs from the start LED; a negative count runs backwards. */
+      z.object({ type: z.literal("length"), count: z.number().int().min(-10000).max(10000) }),
+    ]),
+  }),
+]);
 export type SegmentPlanEntry = z.infer<typeof segmentPlanEntry>;
 
 const controllerFields = {
@@ -171,6 +205,7 @@ export type ControllerStatus = z.infer<typeof controllerStatus>;
 export const controllerUpdate = z.object(controllerFields).partial().extend({
   layout: ledLayout.optional(),
   markers: z.array(ledMarker).max(500).optional(),
+  ranges: z.array(ledRange).max(200).optional(),
   segmentPlan: z.array(segmentPlanEntry).max(32).optional(),
 });
 export type ControllerUpdate = z.infer<typeof controllerUpdate>;
@@ -202,6 +237,7 @@ export const controller = controllerInput.omit({ pin: true }).extend({
   lastError: z.string().nullable(),
   layout: ledLayout,
   markers: z.array(ledMarker),
+  ranges: z.array(ledRange),
   segmentPlan: z.array(segmentPlanEntry),
 });
 export type Controller = z.infer<typeof controller>;

@@ -31,6 +31,7 @@ export function toController(row: ControllerRow): Controller {
     lastError: row.lastError,
     layout: row.layout ?? DEFAULT_LED_LAYOUT,
     markers: [...row.markers].sort((a, b) => a.index - b.index),
+    ranges: row.ranges,
     segmentPlan: row.segmentPlan,
     device: info
       ? {

@@ -1,0 +1,1 @@
+ALTER TABLE `controllers` ADD `ranges` text DEFAULT '[]' NOT NULL;

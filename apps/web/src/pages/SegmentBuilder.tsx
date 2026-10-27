@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import {
   applySegments,
   isClearMarker,
+  isRangeEntry,
+  litLeds,
   overlappingSegments,
   resolveSegment,
+  virtualLength,
   type Controller,
+  type LedRange,
   type Preset,
   type PresetInput,
   type ResolvedSegment,
@@ -22,9 +26,13 @@ const SEGMENT_COLORS = ["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#d946ef", "
 const segmentColor = (i: number) => SEGMENT_COLORS[i % SEGMENT_COLORS.length]!;
 
 const NEW_PRESET = "new";
-// Select values for the non-marker choices; they can't clash with a marker label.
-const LENGTH = "\u0000length";
-const LED = "\u0000led";
+// Select values: "r:<label>:<part>" a range part, "m:<label>" a marker, or an LED number / length.
+const LENGTH = "length";
+const LED = "led";
+const rangeValue = (label: string, span: number) => `r:${span}:${label}`;
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const describeSpan = (s: { start: number; stop: number }) => (s.stop - s.start > 1 ? `${s.start}–${s.stop - 1}` : `${s.start}`);
 
 export function SegmentBuilder() {
   const { id } = useParams({ from: "/controllers/$id/segments" });
@@ -45,24 +53,30 @@ function Builder({ c }: { c: Controller }) {
   };
   useEffect(() => () => clearTimeout(saveTimer.current), []);
 
-  const markers = c.markers;
+  const { markers, ranges } = c;
   const count = c.device?.ledCount ?? 0;
-  const resolved = useMemo(() => plan.map((e) => resolveSegment(e, markers, count)), [plan, markers, count]);
+  const maxSegments = c.device?.maxSegments ?? 32;
+  const resolved = useMemo(
+    () => plan.map((e) => resolveSegment(e, { markers, ranges, ledCount: count })),
+    [plan, markers, ranges, count],
+  );
   const segments = resolved.map((r) => (r.ok ? r.segment : undefined));
   const overlaps = overlappingSegments(segments);
   const valid = plan.length > 0 && resolved.every((r) => r.ok);
 
   const colors = useMemo(() => {
     const out: (string | undefined)[] = [];
-    // Later segments draw on top, as on the controller.
+    // Later segments draw on top, as on the controller. LEDs left off by spacing are drawn faint.
     segments.forEach((s, i) => {
-      if (s) for (let led = s.start; led < s.stop; led++) out[led] = segmentColor(i);
+      if (!s) return;
+      const color = segmentColor(i);
+      for (let led = s.start; led < s.stop; led++) out[led] = `${color}40`;
+      for (const led of litLeds(s)) out[led] = color;
     });
     return out;
   }, [segments]);
 
-  const setEntry = (i: number, patch: Partial<SegmentPlanEntry>) =>
-    setPlan(plan.map((e, j) => (j === i ? { ...e, ...patch } : e)));
+  const setEntry = (i: number, next: SegmentPlanEntry) => setPlan(plan.map((e, j) => (j === i ? next : e)));
   const move = (i: number, delta: number) => {
     const next = [...plan];
     const [entry] = next.splice(i, 1);
@@ -83,6 +97,11 @@ function Builder({ c }: { c: Controller }) {
       },
     ]);
   };
+  // A range with several runs becomes one segment per run.
+  const addRange = (r: LedRange) =>
+    setPlan(
+      [...plan, ...r.spans.map((_, span) => ({ range: r.label, span, reverse: false }))].slice(0, maxSegments),
+    );
 
   return (
     <div>
@@ -101,7 +120,7 @@ function Builder({ c }: { c: Controller }) {
       ) : (
         <div className="flex flex-col gap-4">
           <Card>
-            <LedMap count={count} layout={c.layout} markers={markers} current={null} color="#fff" colors={colors} />
+            <LedMap count={count} layout={c.layout} markers={markers} ranges={ranges} current={null} color="#fff" colors={colors} />
           </Card>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_20rem]">
@@ -116,12 +135,6 @@ function Builder({ c }: { c: Controller }) {
               {plan.length === 0 && (
                 <p className="text-sm text-neutral-500">Add segments in the order they should be numbered on the controller.</p>
               )}
-              {markers.length === 0 && (
-                <p className="text-sm text-neutral-500">
-                  Segments can start and end at LED numbers, or at positions labelled with{" "}
-                  <Link to="/controllers/$id/locate" params={{ id: c.id }} className="text-sky-400 hover:underline">Locate LEDs</Link>.
-                </p>
-              )}
               <ol className="flex flex-col gap-2">
                 {plan.map((entry, i) => (
                   <SegmentRow
@@ -129,11 +142,10 @@ function Builder({ c }: { c: Controller }) {
                     index={i}
                     entry={entry}
                     resolution={resolved[i]!}
-                    markers={markers}
-                    count={count}
+                    c={c}
                     first={i === 0}
                     last={i === plan.length - 1}
-                    onChange={(patch) => setEntry(i, patch)}
+                    onChange={(next) => setEntry(i, next)}
                     onMove={(d) => move(i, d)}
                     onRemove={() => setPlan(plan.filter((_, j) => j !== i))}
                   />
@@ -145,9 +157,29 @@ function Builder({ c }: { c: Controller }) {
                   this; the later segment draws on top.
                 </p>
               )}
-              <div>
-                <Button onClick={add} disabled={plan.length >= (c.device.maxSegments ?? 32)}>Add segment</Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {ranges.map((r) => (
+                  <Button
+                    key={r.label}
+                    onClick={() => addRange(r)}
+                    disabled={plan.length >= maxSegments}
+                    title={`LEDs ${r.spans.map(describeSpan).join(", ")}`}
+                  >
+                    + {r.label}
+                    {r.spans.length > 1 && <span className="ml-1 text-xs text-neutral-400">({r.spans.length} parts)</span>}
+                  </Button>
+                ))}
+                <Button onClick={add} disabled={plan.length >= maxSegments}>
+                  {ranges.length ? "+ Custom segment" : "Add segment"}
+                </Button>
               </div>
+              {ranges.length === 0 && (
+                <p className="text-xs text-neutral-500">
+                  Select and name ranges of LEDs with{" "}
+                  <Link to="/controllers/$id/locate" params={{ id: c.id }} className="text-sky-400 hover:underline">Locate LEDs</Link>{" "}
+                  to add them here in one click.
+                </p>
+              )}
             </Card>
 
             <ApplyPanel c={c} segments={valid ? (segments as ResolvedSegment[]) : null} />
@@ -164,8 +196,7 @@ function SegmentRow({
   index,
   entry,
   resolution,
-  markers,
-  count,
+  c,
   first,
   last,
   onChange,
@@ -175,25 +206,51 @@ function SegmentRow({
   index: number;
   entry: SegmentPlanEntry;
   resolution: ReturnType<typeof resolveSegment>;
-  markers: Controller["markers"];
-  count: number;
+  c: Controller;
   first: boolean;
   last: boolean;
-  onChange: (patch: Partial<SegmentPlanEntry>) => void;
+  onChange: (next: SegmentPlanEntry) => void;
   onMove: (delta: number) => void;
   onRemove: () => void;
 }) {
+  const { markers, ranges } = c;
+  const count = c.device?.ledCount ?? 0;
+  const r = resolution.ok ? resolution.segment : undefined;
+  const { name, grp, spc, of } = entry;
+  const layout = { name, grp, spc, of };
+  const point = isRangeEntry(entry) ? undefined : entry;
+  const pointEnd = point && point.end.type !== "length" ? point.end : undefined;
+
   const markerOptions = (current: string | undefined) => (
     <>
       {current !== undefined && !markers.some((m) => m.label === current) && (
-        <option value={current}>{current} (missing)</option>
+        <option value={`m:${current}`}>{current} (missing)</option>
       )}
       {markers.map((m) => (
-        <option key={m.index} value={m.label}>{m.label} · LED {m.index}</option>
+        <option key={m.index} value={`m:${m.label}`}>{m.label} · LED {m.index}</option>
       ))}
     </>
   );
-  const end = entry.end;
+
+  const sourceValue = isRangeEntry(entry)
+    ? rangeValue(entry.range, entry.span)
+    : typeof entry.start === "number"
+      ? LED
+      : `m:${entry.start}`;
+  const missingRange = isRangeEntry(entry) && !ranges.some((x) => x.label === entry.range && x.spans[entry.span]);
+
+  const setSource = (v: string) => {
+    if (v.startsWith("r:")) {
+      const [, span, ...label] = v.split(":");
+      onChange({ ...layout, range: label.join(":"), span: Number(span), reverse: isRangeEntry(entry) && entry.reverse });
+      return;
+    }
+    const start = v === LED ? (r ? (r.rev ? r.stop - 1 : r.start) : 0) : v.slice(2);
+    if (isRangeEntry(entry))
+      // Keep covering the same LEDs where possible.
+      onChange({ ...layout, start, end: r ? { type: "led", index: r.rev ? r.start : r.stop - 1, includeEnd: true } : { type: "length", count: 10 } });
+    else onChange({ ...entry, start });
+  };
 
   return (
     <li className="rounded-lg border border-neutral-800 p-2 text-sm">
@@ -201,85 +258,57 @@ function SegmentRow({
         <span className="size-3 shrink-0 rounded-full" style={{ background: segmentColor(index) }} />
         <span className="w-6 text-neutral-500 tabular-nums">{index}</span>
         <input
-          value={entry.name ?? ""}
-          onChange={(e) => onChange({ name: e.target.value || undefined })}
+          value={name ?? ""}
+          onChange={(e) => onChange({ ...entry, name: e.target.value || undefined })}
           placeholder="Name (optional)"
           maxLength={32}
           className={`${select} w-32`}
         />
         <label className="flex items-center gap-1">
           <span className="text-xs text-neutral-400">From</span>
-          <select
-            value={typeof entry.start === "number" ? LED : entry.start}
-            onChange={(e) =>
-              onChange({ start: e.target.value === LED ? (resolution.ok ? startLed(resolution.segment) : 0) : e.target.value })
-            }
-            className={select}
-          >
-            {markerOptions(typeof entry.start === "string" ? entry.start : undefined)}
-            <option value={LED}>LED #</option>
+          <select value={sourceValue} onChange={(e) => setSource(e.target.value)} className={select}>
+            {missingRange && <option value={sourceValue}>{entry.range} (missing)</option>}
+            {ranges.length > 0 && (
+              <optgroup label="Ranges (whole run)">
+                {ranges.flatMap((x) =>
+                  x.spans.map((sp, k) => (
+                    <option key={`${x.label}:${k}`} value={rangeValue(x.label, k)}>
+                      {x.label}
+                      {x.spans.length > 1 ? ` (part ${k + 1})` : ""} · {describeSpan(sp)}
+                    </option>
+                  )),
+                )}
+              </optgroup>
+            )}
+            <optgroup label="Start at">
+              {markerOptions(!isRangeEntry(entry) && typeof entry.start === "string" ? entry.start : undefined)}
+              <option value={LED}>LED #</option>
+            </optgroup>
           </select>
         </label>
-        {typeof entry.start === "number" && (
-          <LedInput value={entry.start} count={count} onChange={(start) => onChange({ start })} label="Start LED" />
-        )}
-        <label className="flex items-center gap-1">
-          <span className="text-xs text-neutral-400">to</span>
-          <select
-            value={end.type === "marker" ? end.label : end.type === "led" ? LED : LENGTH}
-            onChange={(e) => {
-              const v = e.target.value;
-              const includeEnd = end.type === "length" || end.includeEnd;
-              const r = resolution.ok ? resolution.segment : undefined;
-              onChange({
-                end:
-                  v === LENGTH
-                    ? { type: "length", count: r ? (r.stop - r.start) * (r.rev ? -1 : 1) : 10 }
-                    : v === LED
-                      ? { type: "led", index: r ? (r.rev ? r.start : r.stop - 1) : count - 1, includeEnd: true }
-                      : { type: "marker", label: v, includeEnd },
-              });
-            }}
-            className={select}
-          >
-            {markerOptions(end.type === "marker" ? end.label : undefined)}
-            <option value={LED}>LED #</option>
-            <option value={LENGTH}>Length</option>
-          </select>
-        </label>
-        {end.type === "led" && (
-          <LedInput value={end.index} count={count} onChange={(index) => onChange({ end: { ...end, index } })} label="End LED" />
-        )}
-        {end.type === "length" && (
-          <label className="flex items-center gap-1" title="Negative counts run backwards from the start LED">
-            <input
-              type="number"
-              value={end.count}
-              onChange={(e) => onChange({ end: { type: "length", count: Math.trunc(Number(e.target.value)) || 0 } })}
-              className={`${select} w-16`}
-            />
-            <span className="text-xs text-neutral-400">LEDs</span>
+        {isRangeEntry(entry) ? (
+          <label className="flex items-center gap-1 text-xs text-neutral-400" title="Run the effect from the range's last LED">
+            <input type="checkbox" checked={entry.reverse} onChange={(e) => onChange({ ...entry, reverse: e.target.checked })} />
+            Reverse
           </label>
+        ) : (
+          <PointEnd entry={entry} r={r} count={count} markerOptions={markerOptions} onChange={onChange} />
         )}
       </div>
-      <div className="mt-1 flex items-center gap-3 pl-11 text-xs">
-        {end.type !== "length" && (
+
+      <div className="mt-2 flex flex-wrap items-center gap-3 pl-11 text-xs">
+        <LayoutField label="Grouping" title="LEDs that show the same pixel" value={grp} min={1} placeholder={1} onChange={(v) => onChange({ ...entry, grp: v })} />
+        <LayoutField label="Spacing" title="LEDs left off after each group" value={spc} min={0} placeholder={0} onChange={(v) => onChange({ ...entry, spc: v })} />
+        <LayoutField label="Offset" title="Shifts the effect along the segment" value={of} min={0} placeholder={0} onChange={(v) => onChange({ ...entry, of: v })} />
+        {point && pointEnd && (
           <label className="flex items-center gap-1 text-neutral-400" title="Also light the end LED">
             <input
               type="checkbox"
-              checked={end.includeEnd}
-              onChange={(e) => onChange({ end: { ...end, includeEnd: e.target.checked } })}
+              checked={pointEnd.includeEnd}
+              onChange={(e) => onChange({ ...point, end: { ...pointEnd, includeEnd: e.target.checked } })}
             />
             Include end LED
           </label>
-        )}
-        {resolution.ok ? (
-          <span className="text-neutral-500">
-            LEDs {resolution.segment.start}–{resolution.segment.stop - 1} · {resolution.segment.stop - resolution.segment.start} LED{resolution.segment.stop - resolution.segment.start === 1 ? "" : "s"}
-            {resolution.segment.rev && " · runs backwards"}
-          </span>
-        ) : (
-          <span className="text-red-400">{resolution.error}</span>
         )}
         <div className="ml-auto flex items-center gap-1">
           <button type="button" aria-label="Move up" disabled={first} onClick={() => onMove(-1)} className="px-1 text-neutral-400 hover:text-neutral-100 disabled:opacity-30">↑</button>
@@ -287,12 +316,120 @@ function SegmentRow({
           <button type="button" aria-label="Remove segment" onClick={onRemove} className="px-1 text-neutral-500 hover:text-red-400">×</button>
         </div>
       </div>
+
+      <div className="mt-1 pl-11 text-xs">
+        {r ? (
+          <span className="text-neutral-500">
+            LEDs {describeSpan(r)} · {plural(r.stop - r.start, "LED")}
+            {r.rev && " · runs backwards"}
+            {(r.grp > 1 || r.spc > 0) &&
+              ` · ${litLeds(r).length} lit, ${plural(virtualLength(r), "pixel")} for effects`}
+          </span>
+        ) : (
+          <span className="text-red-400">{!resolution.ok && resolution.error}</span>
+        )}
+      </div>
     </li>
   );
 }
 
-/** The LED a resolved segment starts from (its last LED when it runs backwards). */
-const startLed = (s: ResolvedSegment) => (s.rev ? s.stop - 1 : s.start);
+type PointEntry = Exclude<SegmentPlanEntry, { range: string }>;
+
+/** The "to" controls of a segment given by a start and an end. */
+function PointEnd({
+  entry,
+  r,
+  count,
+  markerOptions,
+  onChange,
+}: {
+  entry: PointEntry;
+  r: ResolvedSegment | undefined;
+  count: number;
+  markerOptions: (current: string | undefined) => ReactNode;
+  onChange: (next: SegmentPlanEntry) => void;
+}) {
+  const end = entry.end;
+  return (
+    <>
+      {typeof entry.start === "number" && (
+        <LedInput value={entry.start} count={count} onChange={(start) => onChange({ ...entry, start })} label="Start LED" />
+      )}
+      <label className="flex items-center gap-1">
+        <span className="text-xs text-neutral-400">to</span>
+        <select
+          value={end.type === "marker" ? `m:${end.label}` : end.type}
+          onChange={(e) => {
+            const v = e.target.value;
+            const includeEnd = end.type === "length" || end.includeEnd;
+            onChange({
+              ...entry,
+              end:
+                v === LENGTH
+                  ? { type: "length", count: r ? (r.stop - r.start) * (r.rev ? -1 : 1) : 10 }
+                  : v === LED
+                    ? { type: "led", index: r ? (r.rev ? r.start : r.stop - 1) : count - 1, includeEnd: true }
+                    : { type: "marker", label: v.slice(2), includeEnd },
+            });
+          }}
+          className={select}
+        >
+          {markerOptions(end.type === "marker" ? end.label : undefined)}
+          <option value={LED}>LED #</option>
+          <option value={LENGTH}>Length</option>
+        </select>
+      </label>
+      {end.type === "led" && (
+        <LedInput value={end.index} count={count} onChange={(index) => onChange({ ...entry, end: { ...end, index } })} label="End LED" />
+      )}
+      {end.type === "length" && (
+        <label className="flex items-center gap-1" title="Negative counts run backwards from the start LED">
+          <input
+            type="number"
+            value={end.count}
+            onChange={(e) => onChange({ ...entry, end: { type: "length", count: Math.trunc(Number(e.target.value)) || 0 } })}
+            className={`${select} w-16`}
+          />
+          <span className="text-xs text-neutral-400">LEDs</span>
+        </label>
+      )}
+    </>
+  );
+}
+
+/** Small number input for grouping, spacing or offset; empty means the default. */
+function LayoutField({
+  label,
+  title,
+  value,
+  min,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  title: string;
+  value: number | undefined;
+  min: number;
+  placeholder: number;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <label className="flex items-center gap-1 text-neutral-400" title={title}>
+      {label}
+      <input
+        type="number"
+        min={min}
+        max={255}
+        value={value ?? ""}
+        placeholder={String(placeholder)}
+        onChange={(e) =>
+          onChange(e.target.value.trim() === "" ? undefined : Math.min(255, Math.max(min, Math.trunc(Number(e.target.value)) || min)))
+        }
+        className={`${select} w-14 text-neutral-100`}
+      />
+    </label>
+  );
+}
 
 function LedInput({ value, count, label, onChange }: { value: number; count: number; label: string; onChange: (n: number) => void }) {
   return (
@@ -362,6 +499,9 @@ function ApplyPanel({ c, segments }: { c: Controller; segments: ResolvedSegment[
       start: s.start,
       stop: s.stop,
       rev: s.rev,
+      grp: s.grp,
+      spc: s.spc,
+      of: s.of,
       on: true,
       bri: 255,
       fx: 0,
