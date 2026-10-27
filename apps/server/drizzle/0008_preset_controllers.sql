@@ -1,0 +1,1 @@
+ALTER TABLE `presets` ADD `controller_ids` text;

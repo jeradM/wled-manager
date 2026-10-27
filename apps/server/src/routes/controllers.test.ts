@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import type { Controller, ServerEvent } from "@wled-manager/shared";
+import { controllers } from "../db/schema.js";
 import { createTestApp, startMock } from "../test-utils.js";
 
 let t: Awaited<ReturnType<typeof createTestApp>>;
@@ -99,32 +101,35 @@ describe("controllers API", () => {
     expect(res.json<Controller>()).toMatchObject({ name: "Porch", port: mock.port, tags: ["outdoor"] });
   });
 
-  it("stores ranges and a segment plan and reports the segment limit", async () => {
+  it("stores ranges and segment definitions and reports the segment limit", async () => {
     const c = (await add({ name: "Porch", host: mock.host, port: mock.port })).json<Controller>();
-    expect(c.segmentPlan).toEqual([]);
+    expect(c.segments).toEqual([]);
     expect(c.device?.maxSegments).toBe(32);
-    const segmentPlan = [
-      { name: "Roof", start: "A", end: { type: "marker", label: "B", includeEnd: false } },
-      { start: "B", end: { type: "length", count: -10 } },
+    const segments = [
+      { id: "s1", name: "Roof", start: "A", end: { type: "marker", label: "B", includeEnd: false } },
+      { id: "s2", start: "B", end: { type: "length", count: -10 } },
+      { id: "s3", range: "Posts", span: 1, reverse: true },
     ];
     const ranges = [{ label: "Posts", spans: [{ start: 2, stop: 5 }, { start: 8, stop: 9 }] }];
-    const res = await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: { segmentPlan, ranges } });
-    expect(res.json<Controller>()).toMatchObject({ segmentPlan, ranges });
-    const fromRange = [{ range: "Posts", span: 1, reverse: true, grp: 2, spc: 1 }];
-    const res2 = await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: { segmentPlan: fromRange } });
-    expect(res2.json<Controller>().segmentPlan).toEqual(fromRange);
-    const emptySpan = await t.app.inject({
-      method: "PATCH",
-      url: `/api/controllers/${c.id}`,
-      payload: { ranges: [{ label: "x", spans: [{ start: 4, stop: 4 }] }] },
-    });
-    expect(emptySpan.statusCode).toBe(400);
-    const bad = await t.app.inject({
-      method: "PATCH",
-      url: `/api/controllers/${c.id}`,
-      payload: { segmentPlan: [{ start: "A", end: { type: "length" } }] },
-    });
-    expect(bad.statusCode).toBe(400);
+    const res = await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: { segments, ranges } });
+    expect(res.json<Controller>()).toMatchObject({ segments, ranges });
+    const patch = (payload: object) => t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload });
+    expect((await patch({ ranges: [{ label: "x", spans: [{ start: 4, stop: 4 }] }] })).statusCode).toBe(400);
+    expect((await patch({ segments: [{ id: "s", start: "A", end: { type: "length" } }] })).statusCode).toBe(400);
+    expect((await patch({ segments: [{ start: "A", end: { type: "length", count: 3 } }] })).statusCode).toBe(400);
+    expect((await patch({ segments: [segments[0], { ...segments[1], id: "s1" }] })).statusCode).toBe(400);
+  });
+
+  it("upgrades segment plans saved before definitions had IDs", async () => {
+    const c = (await add({ name: "Porch", host: mock.host, port: mock.port })).json<Controller>();
+    t.app.db
+      .update(controllers)
+      .set({ segments: [{ range: "Posts", span: 0, reverse: false, grp: 2, spc: 1 }] as never })
+      .where(eq(controllers.id, c.id))
+      .run();
+    t.app.controllers.upgradeSegmentDefinitions();
+    const [def] = t.app.controllers.get(c.id).segments;
+    expect(def).toEqual({ id: expect.any(String), range: "Posts", span: 0, reverse: false });
   });
 
   it("updates and deletes", async () => {

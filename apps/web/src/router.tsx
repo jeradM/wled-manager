@@ -11,6 +11,7 @@ import { Palettes } from "./pages/Palettes";
 import { EditPalette, NewPalette } from "./pages/PaletteEditor";
 import { Presets } from "./pages/Presets";
 import { EditPreset, NewPreset } from "./pages/PresetEditor";
+import { Settings } from "./pages/Settings";
 
 function HealthDot() {
   const { isSuccess } = useQuery({
@@ -31,6 +32,7 @@ const nav = [
   { to: "/controllers", label: "Controllers" },
   { to: "/palettes", label: "Palettes" },
   { to: "/presets", label: "Presets" },
+  { to: "/settings", label: "Settings" },
 ] as const;
 
 function Root() {
@@ -76,6 +78,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/presets", component: Presets }),
   createRoute({ getParentRoute: () => rootRoute, path: "/presets/new", component: NewPreset }),
   createRoute({ getParentRoute: () => rootRoute, path: "/presets/$id", component: EditPreset }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: Settings }),
 ]);
 
 export const router = createRouter({ routeTree });

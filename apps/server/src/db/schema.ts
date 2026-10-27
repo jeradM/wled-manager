@@ -1,5 +1,5 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import type { LedLayout, LedMarker, LedRange, PaletteStop, PresetState, SegmentPlanEntry } from "@wled-manager/shared";
+import type { LedLayout, LedMarker, LedRange, PaletteStop, PresetState, SegmentDefinition, SegmentGroup } from "@wled-manager/shared";
 import type { WledInfo } from "../wled/client.js";
 
 const timestamps = {
@@ -27,8 +27,8 @@ export const controllers = sqliteTable("controllers", {
   markers: text("markers", { mode: "json" }).$type<LedMarker[]>().notNull().default([]),
   /** Labelled LED selections made with the locator. */
   ranges: text("ranges", { mode: "json" }).$type<LedRange[]>().notNull().default([]),
-  /** Segments planned from markers in the segment builder. */
-  segmentPlan: text("segment_plan", { mode: "json" }).$type<SegmentPlanEntry[]>().notNull().default([]),
+  /** Segments defined for presets to use, built from markers and ranges. */
+  segments: text("segment_plan", { mode: "json" }).$type<SegmentDefinition[]>().notNull().default([]),
   ...timestamps,
 });
 
@@ -52,6 +52,10 @@ export const presets = sqliteTable("presets", {
   state: text("state", { mode: "json" }).$type<PresetState>(),
   /** Set for "raw" presets: the device preset JSON without n/ql. */
   raw: text("raw", { mode: "json" }).$type<Record<string, unknown>>(),
+  /** Segment groups for the editor; never sent to controllers. */
+  groups: text("groups", { mode: "json" }).$type<SegmentGroup[]>(),
+  /** Controllers the preset syncs to; null means all. */
+  controllerIds: text("controller_ids", { mode: "json" }).$type<string[]>(),
   revision: integer("revision").notNull().default(1),
   ...timestamps,
 });
@@ -97,4 +101,10 @@ export const syncState = sqliteTable("sync_state", {
   writtenPresets: text("written_presets", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
   lastError: text("last_error"),
   lastSyncedAt: text("last_synced_at"),
+});
+
+/** App settings changed from the UI, one JSON value per key. */
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value", { mode: "json" }).notNull(),
 });

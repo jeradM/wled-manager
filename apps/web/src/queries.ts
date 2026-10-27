@@ -14,6 +14,7 @@ import type {
   PresetInput,
   QuickControl,
   ServerEvent,
+  Settings,
   SyncPlan,
   SyncResult,
 } from "@wled-manager/shared";
@@ -33,6 +34,7 @@ export const keys = {
   preset: (id: string) => ["presets", id] as const,
   catalog: (id: string) => ["controllers", id, "catalog"] as const,
   importPreview: (id: string) => ["controllers", id, "import"] as const,
+  settings: ["settings"] as const,
 };
 
 export const useControllers = () =>
@@ -274,6 +276,18 @@ export function useSync() {
 }
 
 /** Subscribes to server events and invalidates the affected queries. */
+// ---- Settings ----
+
+export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: () => api<Settings>("/settings") });
+
+export function useSaveSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<Settings>) => api<Settings>("/settings", { method: "PUT", body: JSON.stringify(patch) }),
+    onSuccess: (s) => qc.setQueryData(keys.settings, s),
+  });
+}
+
 export function useServerEvents() {
   const qc = useQueryClient();
   useEffect(() => {
@@ -295,6 +309,9 @@ export function useServerEvents() {
           break;
         case "sync.completed":
           void qc.invalidateQueries({ queryKey: keys.syncPlan(event.controllerId) });
+          break;
+        case "settings.changed":
+          void qc.invalidateQueries({ queryKey: keys.settings });
           break;
       }
     };

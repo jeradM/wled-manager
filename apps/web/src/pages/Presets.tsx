@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { stopsToCss } from "@wled-manager/shared";
+import { presetSkipReason, stopsToCss } from "@wled-manager/shared";
 import { useCatalog, useControllers, usePalettes, usePresets } from "../queries";
 import { effectNames, rawKind, realSegments } from "../components/preset/describe";
 import { Button, Card, PageHeader } from "../components/ui";
@@ -35,12 +35,14 @@ export function Presets() {
                 <th className="px-4 py-2 font-medium">Name</th>
                 <th className="px-4 py-2 font-medium">Contents</th>
                 <th className="px-4 py-2 font-medium">Palettes</th>
+                {controllers.length > 1 && <th className="px-4 py-2 font-medium">Syncs to</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800">
               {presets.map((p) => {
                 const used = p.kind === "state" ? p.state!.seg.flatMap((s) => (typeof s.pal === "object" ? [s.pal.paletteId] : [])) : [];
                 const usedPalettes = palettes.filter((x) => used.includes(x.id));
+                const targets = controllers.filter((c) => !presetSkipReason(p, c, controllers));
                 return (
                   <tr key={p.id} className="hover:bg-neutral-900/60">
                     <td className="px-4 py-2 text-neutral-400">{p.slot}</td>
@@ -62,6 +64,11 @@ export function Presets() {
                         ))}
                       </div>
                     </td>
+                    {controllers.length > 1 && (
+                      <td className={`px-4 py-2 text-xs ${targets.length ? "text-neutral-400" : "text-amber-400"}`}>
+                        {targets.length === controllers.length ? "All" : targets.map((c) => c.name).join(", ") || "None"}
+                      </td>
+                    )}
                   </tr>
                 );
               })}

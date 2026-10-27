@@ -69,6 +69,12 @@ export const segment = z.looseObject({
   spc: z.number().int().min(0).max(255).optional(),
   /** Offset: shifts the effect along the segment. */
   of: z.number().int().min(0).max(65535).optional(),
+  /**
+   * The controller-defined segment this one uses (manager only, never sent to controllers). Its start, stop,
+   * direction and name come from the definition on each controller when the preset is rendered; on a controller
+   * without the definition the segment is left out. The stored values are a copy for reading the preset.
+   */
+  sid: z.string().min(1).max(40).optional(),
 });
 export type Segment = z.infer<typeof segment>;
 
@@ -90,6 +96,16 @@ export type PresetState = z.infer<typeof presetState>;
 export const presetKind = z.enum(["state", "raw"]);
 export type PresetKind = z.infer<typeof presetKind>;
 
+/**
+ * Segments edited together in the preset editor, by position in state.seg. Kept by the manager only;
+ * it isn't sent to controllers.
+ */
+export const segmentGroup = z.object({
+  name: z.string().min(1).max(32),
+  members: z.array(z.number().int().min(0).max(31)).max(32),
+});
+export type SegmentGroup = z.infer<typeof segmentGroup>;
+
 const presetFields = {
   slot: z.number().int().min(1).max(250),
   name: z.string().min(1).max(64),
@@ -98,6 +114,12 @@ const presetFields = {
   kind: presetKind,
   state: presetState.optional(),
   raw: z.record(z.string(), z.unknown()).optional(),
+  groups: z.array(segmentGroup).max(32).optional(),
+  /**
+   * Controllers the preset syncs to; absent means all of them. Either way, a preset using defined segments
+   * only syncs to controllers where at least one of them is defined.
+   */
+  controllers: z.array(z.string()).min(1).max(100).optional(),
 };
 
 const hasPayload = (p: { kind: PresetKind; state?: unknown; raw?: unknown }) =>
@@ -146,29 +168,28 @@ export type LedSpan = z.infer<typeof ledSpan>;
 export const ledRange = z.object({ label: z.string().min(1).max(40), spans: z.array(ledSpan).min(1).max(64) });
 export type LedRange = z.infer<typeof ledRange>;
 
-/** Grouping, spacing and offset for a planned segment; unset means 1, 0 and 0. */
-const planLayoutFields = {
+const definitionFields = {
+  /** Stable reference used by presets. */
+  id: z.string().min(1).max(40),
   name: z.string().max(32).optional(),
-  grp: z.number().int().min(1).max(255).optional(),
-  spc: z.number().int().min(0).max(255).optional(),
-  of: z.number().int().min(0).max(65535).optional(),
 };
 
 /**
- * A planned segment. It covers one run of a labelled range, or it starts at a marker or an LED number and
- * ends at another marker, an LED number, or after a number of LEDs. Markers and ranges are referenced by
- * label so moving them moves the segments built on them.
+ * A segment defined on a controller, for presets to use. It covers one run of a labelled range, or it
+ * starts at a marker or an LED number and ends at another marker, an LED number, or after a number of LEDs.
+ * Markers and ranges are referenced by label so moving them moves the segments built on them. Grouping,
+ * spacing and offset are chosen per preset.
  */
-export const segmentPlanEntry = z.union([
+export const segmentDefinition = z.union([
   z.object({
-    ...planLayoutFields,
+    ...definitionFields,
     range: z.string().min(1),
     /** Which run of the range, for ranges with several. */
     span: z.number().int().min(0),
     reverse: z.boolean(),
   }),
   z.object({
-    ...planLayoutFields,
+    ...definitionFields,
     /** A marker label, or an LED number. */
     start: z.union([z.string().min(1), z.number().int().min(0)]),
     end: z.discriminatedUnion("type", [
@@ -181,7 +202,7 @@ export const segmentPlanEntry = z.union([
     ]),
   }),
 ]);
-export type SegmentPlanEntry = z.infer<typeof segmentPlanEntry>;
+export type SegmentDefinition = z.infer<typeof segmentDefinition>;
 
 const controllerFields = {
   name: z.string().min(1).max(64),
@@ -206,7 +227,11 @@ export const controllerUpdate = z.object(controllerFields).partial().extend({
   layout: ledLayout.optional(),
   markers: z.array(ledMarker).max(500).optional(),
   ranges: z.array(ledRange).max(200).optional(),
-  segmentPlan: z.array(segmentPlanEntry).max(32).optional(),
+  segments: z
+    .array(segmentDefinition)
+    .max(200)
+    .refine((defs) => new Set(defs.map((d) => d.id)).size === defs.length, { message: "segment IDs must be unique" })
+    .optional(),
 });
 export type ControllerUpdate = z.infer<typeof controllerUpdate>;
 
@@ -238,7 +263,7 @@ export const controller = controllerInput.omit({ pin: true }).extend({
   layout: ledLayout,
   markers: z.array(ledMarker),
   ranges: z.array(ledRange),
-  segmentPlan: z.array(segmentPlanEntry),
+  segments: z.array(segmentDefinition),
 });
 export type Controller = z.infer<typeof controller>;
 
@@ -250,10 +275,26 @@ export const quickControl = z.object({
 });
 export type QuickControl = z.infer<typeof quickControl>;
 
+// ---- Settings ----
+
+export const MIN_POLL_INTERVAL_MS = 5_000;
+
+export const settings = z.object({
+  /** How often controllers are polled for status; 0 turns polling off. */
+  pollIntervalMs: z
+    .number()
+    .int()
+    .min(0)
+    .max(3_600_000)
+    .refine((ms) => ms === 0 || ms >= MIN_POLL_INTERVAL_MS, { message: "use 0 (off) or at least 5 seconds" }),
+});
+export type Settings = z.infer<typeof settings>;
+
 /** Events pushed to the UI over SSE. */
 export type ServerEvent =
   | { type: "controller.updated"; controllerId: string }
   | { type: "controller.removed"; controllerId: string }
   | { type: "palettes.changed" }
   | { type: "presets.changed" }
-  | { type: "sync.completed"; controllerId: string };
+  | { type: "sync.completed"; controllerId: string }
+  | { type: "settings.changed" };

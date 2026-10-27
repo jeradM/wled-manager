@@ -16,12 +16,14 @@ import { healthRoutes } from "./routes/health.js";
 import { locatorRoutes } from "./routes/locator.js";
 import { paletteRoutes } from "./routes/palettes.js";
 import { presetRoutes } from "./routes/presets.js";
+import { settingsRoutes } from "./routes/settings.js";
 import { syncRoutes } from "./routes/sync.js";
 import { ControllerService, NotFoundError } from "./services/controllers.js";
 import { LocatorService } from "./services/locator.js";
 import { PaletteTools } from "./services/palette-tools.js";
 import { PaletteService } from "./services/palettes.js";
 import { PresetService, SlotTakenError } from "./services/presets.js";
+import { SettingsService } from "./services/settings.js";
 import { ImportService } from "./sync/import.js";
 import { ControllerLocks, SyncConflictError } from "./sync/locks.js";
 import { SyncService } from "./sync/sync.js";
@@ -31,7 +33,7 @@ export interface AppOptions {
   db: Db;
   webDist?: string;
   logger?: boolean;
-  /** 0 disables background polling. */
+  /** Default poll interval until one is saved in settings; 0 disables background polling. */
   pollIntervalMs?: number;
   wled?: WledClientOptions;
 }
@@ -57,6 +59,7 @@ export async function buildApp({ db, webDist, logger = true, pollIntervalMs = 0,
   app.decorate("db", db);
   app.decorate("events", events);
   const controllers = new ControllerService(db, events, wled);
+  controllers.upgradeSegmentDefinitions();
   const palettes = new PaletteService(db, events);
   const presets = new PresetService(db, events);
   const locks = new ControllerLocks();
@@ -68,6 +71,8 @@ export async function buildApp({ db, webDist, logger = true, pollIntervalMs = 0,
   app.decorate("imports", new ImportService(db, events, locks, controllers, palettes, presets));
   const locator = new LocatorService(controllers, app.log);
   app.decorate("locator", locator);
+  const settings = new SettingsService(db, events, { pollIntervalMs });
+  app.decorate("settings", settings);
   // Hand controllers back in the state they were in if the server stops mid-session.
   app.addHook("onClose", async () => locator.stopAll());
 
@@ -93,6 +98,7 @@ export async function buildApp({ db, webDist, logger = true, pollIntervalMs = 0,
   await app.register(syncRoutes, { prefix: "/api" });
   await app.register(locatorRoutes, { prefix: "/api" });
   await app.register(eventRoutes, { prefix: "/api" });
+  await app.register(settingsRoutes, { prefix: "/api" });
 
   if (webDist && fs.existsSync(webDist)) {
     await app.register(fastifyStatic, { root: webDist });
@@ -104,13 +110,22 @@ export async function buildApp({ db, webDist, logger = true, pollIntervalMs = 0,
     );
   }
 
-  if (pollIntervalMs > 0) {
-    let stopPoller: (() => void) | undefined;
-    app.addHook("onReady", async () => {
-      stopPoller = startPoller(app.controllers, pollIntervalMs, app.log);
-    });
-    app.addHook("onClose", async () => stopPoller?.());
-  }
+  // Polling starts once the server is ready and restarts whenever the interval is changed.
+  let stopPoller: (() => void) | undefined;
+  let ready = false;
+  const applyPolling = (ms: number) => {
+    stopPoller?.();
+    stopPoller = ms > 0 ? startPoller(app.controllers, ms, app.log) : undefined;
+  };
+  app.addHook("onReady", async () => {
+    ready = true;
+    applyPolling(settings.get().pollIntervalMs);
+  });
+  settings.onChange((s) => ready && applyPolling(s.pollIntervalMs));
+  app.addHook("onClose", async () => {
+    ready = false;
+    stopPoller?.();
+  });
 
   return app;
 }
@@ -126,5 +141,6 @@ declare module "fastify" {
     sync: SyncService;
     imports: ImportService;
     locator: LocatorService;
+    settings: SettingsService;
   }
 }

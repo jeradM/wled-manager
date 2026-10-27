@@ -6,7 +6,9 @@ import {
   customPaletteId,
   paletteFileName,
   paletteKey,
+  presetSkipReason,
   renderPreset,
+  resolveSegmentRef,
   stopsToWled,
   type DevicePreset,
   type PaletteChange,
@@ -78,7 +80,15 @@ export class SyncService {
       effects: row.effects ?? [],
       devicePalette: (id) => (slots.has(id) ? customPaletteId(slots.get(id)!, base) : undefined),
       paletteName: (id) => names.get(id),
+      segment: this.segmentResolver(controllerId),
     });
+  }
+
+  /** Looks up defined segments on a controller, falling back to same-named segments for other controllers' definitions. */
+  private segmentResolver(controllerId: string) {
+    const all = this.controllers.list();
+    const target = all.find((c) => c.id === controllerId)!;
+    return (sid: string) => resolveSegmentRef(sid, target, all);
   }
 
   async plan(controllerId: string): Promise<SyncPlan> {
@@ -171,6 +181,7 @@ export class SyncService {
       effects: row.effects ?? [],
       devicePalette: (id: string) => (slots[id] !== undefined ? customPaletteId(slots[id]!, device.base) : undefined),
       paletteName: (id: string) => paletteNames.get(id),
+      segment: this.segmentResolver(controllerId),
     };
     const desiredPresets = new Map<number, DevicePreset>();
     const writtenPresets = state?.writtenPresets ?? {};
@@ -178,19 +189,29 @@ export class SyncService {
       const p = device.presets.get(slot);
       return p && canonicalJson(p) === writtenPresets[slot] ? {} : { replacesUnmanaged: true };
     };
-    const presetChanges: PresetChange[] = this.presets.list().map((p) => {
+    const sources = this.controllers.list();
+    const target = sources.find((c) => c.id === controllerId)!;
+    const skippedPresets: SyncPlan["skippedPresets"] = [];
+    const presetChanges: PresetChange[] = this.presets.list().flatMap((p): PresetChange[] => {
+      const reason = presetSkipReason(p, target, sources);
+      if (reason) {
+        skippedPresets.push({ presetId: p.id, slot: p.slot, name: p.name, reason });
+        return [];
+      }
       const { json, warnings: presetWarnings } = renderPreset(p, renderCtx);
       desiredPresets.set(p.slot, json);
       const onDevice = device.presets.get(p.slot);
       const action = !onDevice ? "create" : canonicalJson(onDevice) === canonicalJson(json) ? "unchanged" : "update";
-      return {
-        action,
-        slot: p.slot,
-        presetId: p.id,
-        name: p.name,
-        ...(action === "update" ? foreignPreset(p.slot) : {}),
-        ...(presetWarnings.length ? { warnings: presetWarnings } : {}),
-      };
+      return [
+        {
+          action,
+          slot: p.slot,
+          presetId: p.id,
+          name: p.name,
+          ...(action === "update" ? foreignPreset(p.slot) : {}),
+          ...(presetWarnings.length ? { warnings: presetWarnings } : {}),
+        },
+      ];
     });
     for (const [slot, p] of device.presets) {
       if (!desiredPresets.has(slot))
@@ -208,6 +229,7 @@ export class SyncService {
       palettes: paletteChanges,
       presets: presetChanges,
       warnings,
+      skippedPresets,
       inSync: [...paletteChanges, ...presetChanges].every((c) => c.action === "unchanged"),
     };
     return { plan, client, device, slots, desiredPalettes, desiredPresets };

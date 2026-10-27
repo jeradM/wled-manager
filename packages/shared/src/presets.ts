@@ -1,4 +1,5 @@
 import type { PaletteRef, PresetInput, PresetState, Segment } from "./schemas.js";
+import { isClearMarker, segmentSets, type SegmentRefResolution } from "./segments.js";
 
 export type DevicePreset = Record<string, unknown>;
 
@@ -57,6 +58,11 @@ export interface RenderContext {
   devicePalette: (paletteId: string) => number | undefined;
   /** Library palette names, for warnings. */
   paletteName?: (paletteId: string) => string | undefined;
+  /**
+   * Geometry of a defined segment on the target device. Segments whose definition isn't there are left out.
+   * Without it, saved start/stop values are used.
+   */
+  segment?: (sid: string) => SegmentRefResolution;
 }
 
 export interface RenderedPreset {
@@ -78,9 +84,32 @@ export function renderPreset(preset: PresetInput, ctx: RenderContext): RenderedP
   const head = { n: preset.name, ...(preset.ql ? { ql: preset.ql } : {}) };
   if (preset.kind === "raw") return { json: { ...preset.raw, ...head }, warnings };
 
-  const seg = preset.state!.seg.map((s) => {
-    const { fxName, pal, ...out } = s;
-    const rendered: Record<string, unknown> = { ...out };
+  const segs = preset.state!.seg;
+  const ids = segs.map((s, i) => s.id ?? i);
+  const repeated = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+  if (repeated.length)
+    warnings.push(`segment ID${repeated.length > 1 ? "s" : ""} ${repeated.join(", ")} used more than once; only the last of each is applied`);
+  const placed = segs.map((s) => (s.sid !== undefined && ctx.segment ? ctx.segment(s.sid) : undefined));
+  // Left-out segments mustn't renumber the others, so IDs become explicit. A preset that turns other segments
+  // off turns the left-out ones off too.
+  const leftOut = placed.some((r) => r && !r.ok);
+  const clearsOthers = segs.some(isClearMarker);
+  // Groups become WLED segment sets; presets without groups keep whatever sets they have.
+  const sets = segmentSets(segs, preset.groups);
+  const seg = segs.flatMap((s, i): Record<string, unknown>[] => {
+    const { fxName, pal, sid, ...out } = s;
+    const rendered: Record<string, unknown> = leftOut ? { id: i, ...out } : { ...out };
+    const r = placed[i];
+    if (r && !r.ok) {
+      warnings.push(`segment ${s.id ?? i} left out: ${r.error}`);
+      return clearsOthers ? [{ id: s.id ?? i, stop: 0 }] : [];
+    }
+    if (r?.ok) {
+      const { start, stop, rev, name } = r.segment;
+      Object.assign(rendered, { start, stop, rev });
+      if (name) rendered.n = name;
+      else delete rendered.n;
+    }
     if (fxName !== undefined && ctx.effects.length) {
       // Effect IDs can shift between firmware versions; the name is authoritative when present.
       const idx = ctx.effects.indexOf(fxName);
@@ -88,7 +117,8 @@ export function renderPreset(preset: PresetInput, ctx: RenderContext): RenderedP
       else warnings.push(`effect "${fxName}" isn't available on this controller`);
     }
     if (pal !== undefined) rendered.pal = resolvePalette(pal, ctx, warnings);
-    return rendered;
+    if (sets?.[i] !== undefined) rendered.set = sets[i];
+    return [rendered];
   });
   return { json: { ...preset.state!, seg, ...head }, warnings };
 }

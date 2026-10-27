@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { LedMarker, Palette, Segment } from "@wled-manager/shared";
 import type { Catalog } from "../../queries";
 import { ColorField } from "./ColorField";
@@ -7,7 +7,9 @@ import { PalettePicker } from "./PalettePicker";
 import { ALL_CONTROLS, parseFxData } from "./fxdata";
 import { BLEND_MODES } from "./wled-options";
 
-const TYPED_KEYS = new Set(["id", "start", "stop", "on", "bri", "fx", "fxName", "sx", "ix", "c1", "c2", "c3", "o1", "o2", "o3", "col", "pal", "bm", "grp", "spc", "of"]);
+const TYPED_KEYS = new Set(["id", "start", "stop", "on", "bri", "fx", "fxName", "sx", "ix", "c1", "c2", "c3", "o1", "o2", "o3", "col", "pal", "bm", "grp", "spc", "of", "sid"]);
+/** Set from the definition on segments that use one. */
+const DEFINED_KEYS = new Set(["rev", "n"]);
 
 interface Props {
   index: number;
@@ -18,33 +20,71 @@ interface Props {
   /** Labelled LED positions on the source controller, suggested for start/stop. */
   markers: LedMarker[];
   onChange: (s: Segment) => void;
-  onRemove: () => void;
+  onRemove?: () => void;
+  /** Heading; defaults to "Segment <id>". */
+  title?: ReactNode;
+  /** Shown before the heading, e.g. a drag handle. */
+  leading?: ReactNode;
+  /** Shown in the header next to the controls, e.g. a group picker. */
+  headerExtra?: ReactNode;
+  /** Where the segment's LEDs come from, shown above the settings. */
+  source?: ReactNode;
+  /** Hide start/stop: when editing several segments at once, or when a defined segment sets them. */
+  hideGeometry?: boolean;
+  /** Left border color, e.g. the segment's group. */
+  accent?: string;
 }
 
 const numberOrUndefined = (v: string) => (v.trim() === "" ? undefined : Math.max(0, Math.round(Number(v)) || 0));
 
-export function SegmentEditor({ index, segment: s, catalog, library, rgbw, markers, onChange, onRemove }: Props) {
+export function SegmentEditor({
+  index,
+  segment: s,
+  catalog,
+  library,
+  rgbw,
+  markers,
+  onChange,
+  onRemove,
+  title,
+  leading,
+  headerExtra,
+  source,
+  hideGeometry,
+  accent,
+}: Props) {
   const markerList = `segment-markers-${index}`;
   const [showAll, setShowAll] = useState(false);
   const set = (patch: Partial<Segment>) => onChange({ ...s, ...patch });
   const effects = catalog?.effects ?? [];
   const fx = s.fxName !== undefined && effects.includes(s.fxName) ? effects.indexOf(s.fxName) : s.fx;
   const controls = showAll || fx === undefined ? ALL_CONTROLS : parseFxData(fx, catalog?.fxdata[fx]);
-  const extraKeys = Object.keys(s).filter((k) => !TYPED_KEYS.has(k));
+  const extraKeys = Object.keys(s).filter((k) => !TYPED_KEYS.has(k) && !(s.sid && DEFINED_KEYS.has(k)));
   const colorLabels = controls.colors.length ? controls.colors : ["Primary"];
 
   return (
-    <div className="rounded-lg border border-neutral-800 p-3">
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-sm font-medium">Segment {s.id ?? index}</span>
+    <div
+      className={`rounded-lg border border-neutral-800 p-3 ${accent ? "border-l-4" : ""}`}
+      style={accent ? { borderLeftColor: accent } : undefined}
+    >
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-medium">
+          {leading}
+          {title ?? `Segment ${s.id ?? index}`}
+        </span>
         <div className="flex items-center gap-3 text-xs">
+          {headerExtra}
           <label className="flex items-center gap-1 text-neutral-400">
             <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
             All controls
           </label>
-          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">Remove</button>
+          {onRemove && (
+            <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">Remove</button>
+          )}
         </div>
       </div>
+
+      {source && <div className="mb-3 text-sm">{source}</div>}
 
       <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
         <div className="col-span-2 flex flex-col gap-1">
@@ -57,28 +97,32 @@ export function SegmentEditor({ index, segment: s, catalog, library, rgbw, marke
             onChange={(id, name) => set({ fx: id, fxName: name })}
           />
         </div>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-neutral-400">Start LED</span>
-          <input
-            value={s.start ?? ""}
-            onChange={(e) => set({ start: numberOrUndefined(e.target.value) })}
-            list={markerList}
-            placeholder="keep"
-            inputMode="numeric"
-            className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-neutral-400">Stop LED</span>
-          <input
-            value={s.stop ?? ""}
-            onChange={(e) => set({ stop: numberOrUndefined(e.target.value) })}
-            list={markerList}
-            placeholder="keep"
-            inputMode="numeric"
-            className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
-          />
-        </label>
+        {!hideGeometry && (
+          <>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-neutral-400">Start LED</span>
+              <input
+                value={s.start ?? ""}
+                onChange={(e) => set({ start: numberOrUndefined(e.target.value) })}
+                list={markerList}
+                placeholder="keep"
+                inputMode="numeric"
+                className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-neutral-400">Stop LED</span>
+              <input
+                value={s.stop ?? ""}
+                onChange={(e) => set({ stop: numberOrUndefined(e.target.value) })}
+                list={markerList}
+                placeholder="keep"
+                inputMode="numeric"
+                className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
+              />
+            </label>
+          </>
+        )}
         <NumberField
           label="Grouping"
           title="LEDs that show the same pixel, so the effect looks coarser"

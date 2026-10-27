@@ -73,6 +73,71 @@ describe("importPreset / renderPreset", () => {
     expect(warnings).toEqual([`effect "Breathe" isn't available on this controller`, `palette "Red" isn't on this controller; using Default`]);
   });
 
+  it("takes defined segments' LEDs, direction and name from the target controller", () => {
+    const preset = {
+      slot: 1,
+      name: "Roof",
+      kind: "state" as const,
+      state: {
+        seg: [
+          { sid: "gone", start: 20, stop: 30, fx: 0 },
+          { sid: "roof", start: 0, stop: 10, n: "Old", grp: 2, fx: 0 },
+          { fx: 1 },
+        ],
+      },
+    };
+    const ctx = {
+      effects,
+      devicePalette: () => undefined,
+      segment: (sid: string) =>
+        sid === "roof"
+          ? ({ ok: true, segment: { name: "Roofline", start: 100, stop: 150, rev: true }, definition: { id: "roof", start: 100, end: { type: "length", count: 50 } }, byName: false } as const)
+          : ({ ok: false, error: "its defined segment was deleted" } as const),
+    };
+    const { json, warnings } = renderPreset(preset, ctx);
+    // The segment whose definition is missing is left out; the others keep their IDs.
+    expect(json.seg).toEqual([
+      { id: 1, start: 100, stop: 150, rev: true, n: "Roofline", grp: 2, fx: 0 },
+      { id: 2, fx: 1 },
+    ]);
+    expect(warnings).toEqual(["segment 0 left out: its defined segment was deleted"]);
+
+    // A preset that turns other segments off turns the left-out one off as well.
+    const clearing = { ...preset, state: { seg: [...preset.state.seg, { stop: 0 }] } };
+    expect(renderPreset(clearing, ctx).json.seg).toEqual([
+      { id: 0, stop: 0 },
+      { id: 1, start: 100, stop: 150, rev: true, n: "Roofline", grp: 2, fx: 0 },
+      { id: 2, fx: 1 },
+      { id: 3, stop: 0 },
+    ]);
+  });
+
+  it("puts grouped segments in WLED segment sets", () => {
+    const preset = {
+      slot: 1,
+      name: "P",
+      kind: "state" as const,
+      state: { seg: [{ id: 0, fx: 1 }, { id: 1, fx: 2, set: 2 }, { id: 2, fx: 3 }, { id: 3, stop: 0 }] },
+      groups: [{ name: "Windows", members: [0, 2] }],
+    };
+    const ctx = { effects, devicePalette: () => undefined };
+    expect(renderPreset(preset, ctx).json.seg).toEqual([
+      { id: 0, fx: 1, set: 1 },
+      { id: 1, fx: 2, set: 0 },
+      { id: 2, fx: 3, set: 1 },
+      { id: 3, stop: 0 },
+    ]);
+    // Without groups, sets stay as saved (e.g. from an imported preset).
+    expect(renderPreset({ ...preset, groups: undefined }, ctx).json.seg).toEqual(preset.state.seg);
+  });
+
+  it("warns about segments sharing an ID", () => {
+    const preset = { slot: 1, name: "P", kind: "state" as const, state: { seg: [{ id: 1 }, { id: 4 }, { id: 4 }, { fx: 1 }] } };
+    expect(renderPreset(preset, { effects, devicePalette: () => undefined }).warnings).toEqual([
+      "segment ID 4 used more than once; only the last of each is applied",
+    ]);
+  });
+
   it("names unnamed presets by slot", () => {
     expect(importPreset(7, { seg: [] }, { effects, libraryPalette }).name).toBe("Preset 7");
   });
