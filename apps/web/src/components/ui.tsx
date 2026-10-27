@@ -73,3 +73,35 @@ export const timeAgo = (iso: string | null) => {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 };
+
+/** A button that opens a file picker and hands over the chosen file. */
+export function FileButton({
+  accept,
+  onFile,
+  children,
+  disabled,
+}: {
+  accept?: string;
+  onFile: (file: File) => void;
+  children: ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <label
+      className="cursor-pointer rounded-md bg-neutral-800 px-3 py-1.5 text-sm font-medium text-neutral-100 transition-colors hover:bg-neutral-700 has-disabled:cursor-default has-disabled:opacity-50"
+    >
+      {children}
+      <input
+        type="file"
+        accept={accept}
+        disabled={disabled}
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onFile(file);
+        }}
+      />
+    </label>
+  );
+}

@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Controller,
+  ControllerExport,
+  ControllerImport,
   ControllerInput,
   ControllerUpdate,
   ImportPreview,
@@ -70,6 +72,28 @@ export function useAddController() {
     mutationFn: (input: ControllerInput) =>
       api<Controller>("/controllers", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.controllers }),
+  });
+}
+
+export function useImportController() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ControllerImport) =>
+      api<Controller>("/controllers/import", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.controllers }),
+  });
+}
+
+/** Replaces a controller's layout, markers, ranges and segments with an export file's. */
+export function useReplaceSetup(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: ControllerExport) =>
+      api<Controller>(`/controllers/${id}/setup`, { method: "PUT", body: JSON.stringify(file) }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.controllers });
+      void qc.invalidateQueries({ queryKey: keys.syncPlans });
+    },
   });
 }
 

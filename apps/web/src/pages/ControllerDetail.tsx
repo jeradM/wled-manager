@@ -8,11 +8,13 @@ import {
   useDeviceState,
   useQuickControl,
   useRefreshController,
+  useReplaceSetup,
   useUpdateController,
 } from "../queries";
+import { readControllerFile, setupSummary } from "../controllerFile";
 import { ImportPanel } from "../components/ImportPanel";
 import { SyncCard } from "../components/SyncCard";
-import { Button, Card, ErrorText, Input, PageHeader, StatusDot, timeAgo } from "../components/ui";
+import { Button, Card, ErrorText, FileButton, Input, PageHeader, StatusDot, timeAgo } from "../components/ui";
 
 export function ControllerDetail() {
   const { id } = useParams({ from: "/controllers/$id" });
@@ -58,6 +60,7 @@ export function ControllerDetail() {
         {importing && <ImportPanel controllerId={c.id} onClose={() => setImporting(false)} />}
         <SyncCard controllerId={c.id} online={c.status === "online"} />
         <Settings c={c} />
+        <SetupFile c={c} />
       </div>
     </div>
   );
@@ -183,6 +186,60 @@ function Settings({ c }: { c: Controller }) {
           <Button variant="primary" type="submit" disabled={update.isPending}>Save</Button>
         </div>
       </form>
+    </Card>
+  );
+}
+
+function SetupFile({ c }: { c: Controller }) {
+  const replace = useReplaceSetup(c.id);
+  const [error, setError] = useState<unknown>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  const replaceFrom = async (file: File) => {
+    setError(null);
+    setDone(null);
+    try {
+      const imported = await readControllerFile(file);
+      const from = imported.controller;
+      const ledCount = c.device?.ledCount;
+      const wiring =
+        from.ledCount !== null && ledCount !== undefined && from.ledCount !== ledCount
+          ? `\n\n${from.name} had ${from.ledCount} LEDs; this controller has ${ledCount}.`
+          : "";
+      const message =
+        `Replace ${c.name}'s LED layout and ${setupSummary(c)} with ${from.name}'s ${setupSummary(from)}?` +
+        ` Its name, address and tags stay as they are.${wiring}`;
+      if (!confirm(message)) return;
+      await replace.mutateAsync(imported);
+      setDone(`Replaced with ${from.name}'s setup.`);
+    } catch (e) {
+      setError(e);
+    }
+  };
+
+  return (
+    <Card>
+      <h2 className="mb-1 font-medium">Setup file</h2>
+      <p className="mb-3 text-sm text-neutral-400">
+        Name, address, tags, LED layout, {setupSummary(c)}. Export them to bring this controller into another WLED
+        Manager; presets keep using its segments there.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <a
+          href={`/api/controllers/${c.id}/export`}
+          download
+          className="rounded-md bg-neutral-800 px-3 py-1.5 text-sm font-medium text-neutral-100 transition-colors hover:bg-neutral-700"
+        >
+          Export
+        </a>
+        <FileButton accept=".json,application/json" onFile={replaceFrom} disabled={replace.isPending}>
+          Replace from file…
+        </FileButton>
+        {done && <span className="text-sm text-emerald-400">{done}</span>}
+      </div>
+      <div className="mt-2">
+        <ErrorText error={error} />
+      </div>
     </Card>
   );
 }

@@ -235,6 +235,42 @@ export const controllerUpdate = z.object(controllerFields).partial().extend({
 });
 export type ControllerUpdate = z.infer<typeof controllerUpdate>;
 
+export const CONTROLLER_EXPORT_FORMAT = "wled-manager/controller";
+
+/**
+ * A controller's manager-side setup, saved to a file to bring it into another WLED Manager. Segment
+ * definitions keep their IDs, so presets using them link up again. The settings PIN isn't included.
+ */
+export const controllerExport = z.object({
+  format: z.literal(CONTROLLER_EXPORT_FORMAT),
+  version: z.literal(1),
+  exportedAt: z.string(),
+  controller: z.object({
+    name: controllerFields.name,
+    host: controllerFields.host,
+    port: controllerFields.port,
+    tags: controllerFields.tags,
+    layout: ledLayout,
+    markers: controllerUpdate.shape.markers.unwrap(),
+    ranges: controllerUpdate.shape.ranges.unwrap(),
+    segments: controllerUpdate.shape.segments.unwrap(),
+    /** LED count when exported, to spot a controller wired differently. */
+    ledCount: z.number().int().nullable(),
+  }),
+});
+export type ControllerExport = z.infer<typeof controllerExport>;
+
+/** Adds a controller from an export; name, address and PIN can be changed from the file's. */
+export const controllerImport = z.object({
+  file: controllerExport,
+  name: controllerFields.name.optional(),
+  host: controllerFields.host.optional(),
+  port: controllerFields.port.optional(),
+  pin: controllerFields.pin,
+  tags: controllerFields.tags.optional(),
+});
+export type ControllerImport = z.infer<typeof controllerImport>;
+
 /** Summary of the device's /json/info, captured at the last successful poll. */
 export const deviceSummary = z.object({
   version: z.string(),

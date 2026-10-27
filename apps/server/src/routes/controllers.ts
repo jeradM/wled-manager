@@ -1,6 +1,13 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { controller, controllerInput, controllerUpdate, quickControl } from "@wled-manager/shared";
+import {
+  controller,
+  controllerExport,
+  controllerImport,
+  controllerInput,
+  controllerUpdate,
+  quickControl,
+} from "@wled-manager/shared";
 
 const params = z.object({ id: z.string() });
 
@@ -15,6 +22,27 @@ export const controllerRoutes: FastifyPluginAsyncZod = async (app) => {
     "/controllers",
     { schema: { body: controllerInput, response: { 201: controller } } },
     async (req, reply) => reply.code(201).send(await svc.create(req.body)),
+  );
+
+  app.post(
+    "/controllers/import",
+    { schema: { body: controllerImport, response: { 201: controller } } },
+    async (req, reply) => reply.code(201).send(await svc.import(req.body)),
+  );
+
+  /** The controller's setup as a downloadable file. */
+  app.get("/controllers/:id/export", { schema: { params, response: { 200: controllerExport } } }, async (req, reply) => {
+    const file = svc.export(req.params.id);
+    const name = file.controller.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "controller";
+    reply.header("content-disposition", `attachment; filename="${name}.wled-controller.json"`);
+    return file;
+  });
+
+  /** Replaces the controller's layout, markers, ranges and segments with an exported file's. */
+  app.put(
+    "/controllers/:id/setup",
+    { schema: { params, body: controllerExport, response: { 200: controller } } },
+    async (req) => svc.importSetup(req.params.id, req.body),
   );
 
   app.get("/controllers/:id", { schema: { params, response: { 200: controller } } }, async (req) =>

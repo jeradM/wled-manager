@@ -139,4 +139,74 @@ describe("controllers API", () => {
     expect((await t.app.inject({ method: "DELETE", url: `/api/controllers/${c.id}` })).statusCode).toBe(204);
     expect((await t.app.inject({ method: "GET", url: `/api/controllers/${c.id}` })).statusCode).toBe(404);
   });
+
+  describe("export and import", () => {
+    const setup = {
+      layout: { type: "grid", columns: 20, serpentine: true, reverse: false },
+      markers: [{ index: 10, label: "Corner" }],
+      ranges: [{ label: "Posts", spans: [{ start: 0, stop: 5 }] }],
+      segments: [
+        { id: "roof", name: "Roof", start: "Corner", end: { type: "length", count: 30 } },
+        { id: "posts", range: "Posts", span: 0, reverse: false },
+      ],
+    };
+
+    const exported = async () => {
+      const c = (await add({ name: "Front Porch", host: mock.host, port: mock.port, tags: ["outdoor"], pin: "1234" })).json<Controller>();
+      await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: setup });
+      const res = await t.app.inject({ method: "GET", url: `/api/controllers/${c.id}/export` });
+      expect(res.headers["content-disposition"]).toBe(`attachment; filename="front-porch.wled-controller.json"`);
+      return res.json();
+    };
+
+    it("exports a controller's setup without its PIN", async () => {
+      const file = await exported();
+      expect(file).toMatchObject({
+        format: "wled-manager/controller",
+        version: 1,
+        controller: { name: "Front Porch", host: mock.host, port: mock.port, tags: ["outdoor"], ledCount: 120, ...setup },
+      });
+      expect(JSON.stringify(file)).not.toContain("1234");
+    });
+
+    it("adds the controller to another instance, keeping segment IDs", async () => {
+      const file = await exported();
+      const other = await createTestApp();
+      try {
+        const res = await other.app.inject({ method: "POST", url: "/api/controllers/import", payload: { file } });
+        expect(res.statusCode).toBe(201);
+        expect(res.json<Controller>()).toMatchObject({ name: "Front Porch", tags: ["outdoor"], hasPin: false, status: "online", ...setup });
+
+        // Name, address and PIN can be changed from the file's.
+        const renamed = await other.app.inject({
+          method: "POST",
+          url: "/api/controllers/import",
+          payload: { file, name: "Back Porch", pin: "42" },
+        });
+        expect(renamed.json<Controller>()).toMatchObject({ name: "Back Porch", hasPin: true, segments: setup.segments });
+
+        const unreachable = await other.app.inject({ method: "POST", url: "/api/controllers/import", payload: { file, port: 1 } });
+        expect(unreachable.statusCode).toBe(502);
+      } finally {
+        await other.cleanup();
+      }
+      expect(mock.writes).toEqual([]);
+    });
+
+    it("replaces an existing controller's setup, leaving its name and address", async () => {
+      const file = await exported();
+      const c = (await add({ name: "Garage", host: mock.host, port: mock.port, tags: ["indoor"] })).json<Controller>();
+      const res = await t.app.inject({ method: "PUT", url: `/api/controllers/${c.id}/setup`, payload: file });
+      expect(res.json<Controller>()).toMatchObject({ name: "Garage", tags: ["indoor"], ...setup });
+    });
+
+    it("rejects files that aren't controller exports", async () => {
+      const file = await exported();
+      const post = (payload: object) => t.app.inject({ method: "POST", url: "/api/controllers/import", payload });
+      expect((await post({ file: { ...file, format: "other" } })).statusCode).toBe(400);
+      expect((await post({ file: { ...file, version: 2 } })).statusCode).toBe(400);
+      const dup = { ...file.controller, segments: [setup.segments[0], setup.segments[0]] };
+      expect((await post({ file: { ...file, controller: dup } })).statusCode).toBe(400);
+    });
+  });
 });

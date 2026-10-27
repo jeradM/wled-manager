@@ -1,20 +1,37 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
+import type { ControllerExport } from "@wled-manager/shared";
+import { readControllerFile } from "../controllerFile";
 import { useControllers } from "../queries";
 import { AddControllerForm } from "../components/AddControllerForm";
-import { Button, PageHeader, StatusDot, timeAgo } from "../components/ui";
+import { Button, ErrorText, FileButton, PageHeader, StatusDot, timeAgo } from "../components/ui";
 
 export function Controllers() {
   const { data: controllers = [] } = useControllers();
-  const [adding, setAdding] = useState(false);
+  // false, or the form's contents: empty, or from an export file.
+  const [adding, setAdding] = useState<false | { imported?: ControllerExport }>(false);
+  const [fileError, setFileError] = useState<unknown>(null);
+
+  const importFile = (file: File) => {
+    setFileError(null);
+    readControllerFile(file).then((imported) => setAdding({ imported }), setFileError);
+  };
 
   return (
     <div>
       <PageHeader
         title="Controllers"
-        actions={!adding && <Button variant="primary" onClick={() => setAdding(true)}>Add controller</Button>}
+        actions={
+          !adding && (
+            <>
+              <FileButton accept=".json,application/json" onFile={importFile}>Import controller</FileButton>
+              <Button variant="primary" onClick={() => setAdding({})}>Add controller</Button>
+            </>
+          )
+        }
       />
-      {adding && <AddControllerForm onDone={() => setAdding(false)} />}
+      {!!fileError && <div className="mb-4"><ErrorText error={fileError} /></div>}
+      {adding && <AddControllerForm key={adding.imported?.exportedAt ?? "new"} imported={adding.imported} onDone={() => setAdding(false)} />}
       <div className="overflow-hidden rounded-lg border border-neutral-800">
         <table className="w-full text-left text-sm">
           <thead className="bg-neutral-900 text-xs text-neutral-400">
