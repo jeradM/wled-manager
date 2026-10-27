@@ -7,6 +7,7 @@ import type { EventBus } from "../events.js";
 import {
   customPaletteBase,
   DEFAULT_CUSTOM_PALETTE_MAX,
+  DEFAULT_MAX_SEGMENTS,
   WledClient,
   type WledClientOptions,
   type WledInfo,
@@ -30,6 +31,8 @@ export function toController(row: ControllerRow): Controller {
     lastError: row.lastError,
     layout: row.layout ?? DEFAULT_LED_LAYOUT,
     markers: [...row.markers].sort((a, b) => a.index - b.index),
+    ranges: row.ranges,
+    segments: row.segments,
     device: info
       ? {
           version: info.ver,
@@ -42,6 +45,7 @@ export function toController(row: ControllerRow): Controller {
           customPaletteCount: info.cpalcount ?? 0,
           customPaletteMax: info.cpalmax ?? DEFAULT_CUSTOM_PALETTE_MAX,
           customPaletteBase: customPaletteBase(info),
+          maxSegments: info.leds.maxseg ?? DEFAULT_MAX_SEGMENTS,
         }
       : null,
   };
@@ -53,6 +57,21 @@ export class ControllerService {
     private events: EventBus,
     private clientOptions: WledClientOptions = {},
   ) {}
+
+  /**
+   * Segment definitions saved before presets referenced them had no IDs and carried grouping, spacing and
+   * offset, which are now chosen per preset. Gives them IDs and drops those fields.
+   */
+  upgradeSegmentDefinitions() {
+    for (const row of this.db.select({ id: controllers.id, segments: controllers.segments }).from(controllers).all()) {
+      if (row.segments.every((d) => typeof d.id === "string" && !("grp" in d || "spc" in d || "of" in d))) continue;
+      const segments = row.segments.map((d) => {
+        const { grp: _g, spc: _s, of: _o, ...rest } = d as typeof d & { grp?: number; spc?: number; of?: number };
+        return { ...rest, id: typeof d.id === "string" ? d.id : randomUUID() };
+      });
+      this.db.update(controllers).set({ segments }).where(eq(controllers.id, row.id)).run();
+    }
+  }
 
   list(): Controller[] {
     return this.db.select().from(controllers).orderBy(controllers.name).all().map(toController);

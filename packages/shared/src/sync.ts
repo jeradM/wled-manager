@@ -21,6 +21,8 @@ export interface SyncPlan {
   palettes: PaletteChange[];
   presets: PresetChange[];
   warnings: string[];
+  /** Library presets that don't go to this controller, and why. */
+  skippedPresets: { presetId: string; slot: number; name: string; reason: string }[];
   /** True when applying would change nothing on the device. */
   inSync: boolean;
 }

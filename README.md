@@ -28,7 +28,7 @@ mise exec -- pnpm --filter @wled-manager/server db:generate
 |---|---|---|
 | `PORT` | `8080` | HTTP port |
 | `DATA_DIR` | `./data` | SQLite location |
-| `POLL_INTERVAL_MS` | `30000` | Controller status poll interval (`0` disables) |
+| `POLL_INTERVAL_MS` | `30000` | Default controller status poll interval (`0` disables); a value saved on the Settings page takes precedence |
 
 ## Docker
 

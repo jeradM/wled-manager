@@ -1,11 +1,16 @@
-import type { Preset, Segment } from "@wled-manager/shared";
+import { isClearMarker, type Preset, type Segment } from "@wled-manager/shared";
 
-/**
- * WLED saves {"stop": 0} entries for unused segment slots; loading the preset clears those segments.
- * They carry no settings of their own.
- */
-export const isClearMarker = (s: Segment) =>
-  s.stop === 0 && Object.keys(s).every((k) => k === "stop" || k === "id");
+export { isClearMarker };
+
+/** Settings for a segment added in the editor: solid amber. */
+export const newSegment = (rgbw: boolean): Segment => ({
+  fx: 0,
+  fxName: "Solid",
+  sx: 128,
+  ix: 128,
+  col: [rgbw ? [255, 160, 0, 0] : [255, 160, 0]],
+  pal: 0,
+});
 
 export const realSegments = (p: Preset) => (p.kind === "state" ? p.state!.seg.filter((s) => !isClearMarker(s)) : []);
 

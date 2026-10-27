@@ -18,6 +18,8 @@ const toPreset = (row: PresetRow): Preset => ({
   kind: row.kind,
   ...(row.state ? { state: row.state } : {}),
   ...(row.raw ? { raw: row.raw } : {}),
+  ...(row.groups?.length ? { groups: row.groups } : {}),
+  ...(row.controllerIds?.length ? { controllers: row.controllerIds } : {}),
   revision: row.revision,
   updatedAt: row.updatedAt,
 });
@@ -30,6 +32,8 @@ const columns = (input: PresetInput) => ({
   kind: input.kind,
   state: input.kind === "state" ? input.state! : null,
   raw: input.kind === "raw" ? input.raw! : null,
+  groups: input.kind === "state" && input.groups?.length ? input.groups : null,
+  controllerIds: input.controllers?.length ? input.controllers : null,
 });
 
 export class PresetService {

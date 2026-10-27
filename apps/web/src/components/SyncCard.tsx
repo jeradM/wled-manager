@@ -143,6 +143,18 @@ function PresetChanges({ plan }: { plan: SyncPlan }) {
           ))}
         </tbody>
       </table>
+      {plan.skippedPresets.length > 0 && (
+        <details className="mt-2 text-xs text-neutral-500">
+          <summary className="cursor-pointer">Not synced to this controller ({plan.skippedPresets.length})</summary>
+          <ul className="mt-1 flex flex-col gap-0.5 pl-4">
+            {plan.skippedPresets.map((p) => (
+              <li key={p.presetId}>
+                {p.slot}. {p.name}: {p.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </>
   );
 }

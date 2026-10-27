@@ -63,6 +63,18 @@ export const segment = z.looseObject({
   pal: paletteRef.optional(),
   /** How the segment is blended with segments below it (newer firmware). */
   bm: z.number().int().min(0).max(255).optional(),
+  /** Grouping: LEDs that show the same pixel. */
+  grp: z.number().int().min(1).max(255).optional(),
+  /** Spacing: LEDs left off after each group. */
+  spc: z.number().int().min(0).max(255).optional(),
+  /** Offset: shifts the effect along the segment. */
+  of: z.number().int().min(0).max(65535).optional(),
+  /**
+   * The controller-defined segment this one uses (manager only, never sent to controllers). Its start, stop,
+   * direction and name come from the definition on each controller when the preset is rendered; on a controller
+   * without the definition the segment is left out. The stored values are a copy for reading the preset.
+   */
+  sid: z.string().min(1).max(40).optional(),
 });
 export type Segment = z.infer<typeof segment>;
 
@@ -84,6 +96,16 @@ export type PresetState = z.infer<typeof presetState>;
 export const presetKind = z.enum(["state", "raw"]);
 export type PresetKind = z.infer<typeof presetKind>;
 
+/**
+ * Segments edited together in the preset editor, by position in state.seg. Kept by the manager only;
+ * it isn't sent to controllers.
+ */
+export const segmentGroup = z.object({
+  name: z.string().min(1).max(32),
+  members: z.array(z.number().int().min(0).max(31)).max(32),
+});
+export type SegmentGroup = z.infer<typeof segmentGroup>;
+
 const presetFields = {
   slot: z.number().int().min(1).max(250),
   name: z.string().min(1).max(64),
@@ -92,6 +114,12 @@ const presetFields = {
   kind: presetKind,
   state: presetState.optional(),
   raw: z.record(z.string(), z.unknown()).optional(),
+  groups: z.array(segmentGroup).max(32).optional(),
+  /**
+   * Controllers the preset syncs to; absent means all of them. Either way, a preset using defined segments
+   * only syncs to controllers where at least one of them is defined.
+   */
+  controllers: z.array(z.string()).min(1).max(100).optional(),
 };
 
 const hasPayload = (p: { kind: PresetKind; state?: unknown; raw?: unknown }) =>
@@ -130,6 +158,52 @@ export const DEFAULT_LED_LAYOUT: LedLayout = { type: "strip", columns: 50, serpe
 export const ledMarker = z.object({ index: z.number().int().min(0), label: z.string().min(1).max(40) });
 export type LedMarker = z.infer<typeof ledMarker>;
 
+/** A run of LEDs: start..stop-1, as in WLED segments. */
+export const ledSpan = z
+  .object({ start: z.number().int().min(0), stop: z.number().int().min(1) })
+  .refine((s) => s.stop > s.start, { message: "stop must be after start" });
+export type LedSpan = z.infer<typeof ledSpan>;
+
+/** A labelled selection of LEDs, e.g. "roofline", made with the locator. It may have several runs. */
+export const ledRange = z.object({ label: z.string().min(1).max(40), spans: z.array(ledSpan).min(1).max(64) });
+export type LedRange = z.infer<typeof ledRange>;
+
+const definitionFields = {
+  /** Stable reference used by presets. */
+  id: z.string().min(1).max(40),
+  name: z.string().max(32).optional(),
+};
+
+/**
+ * A segment defined on a controller, for presets to use. It covers one run of a labelled range, or it
+ * starts at a marker or an LED number and ends at another marker, an LED number, or after a number of LEDs.
+ * Markers and ranges are referenced by label so moving them moves the segments built on them. Grouping,
+ * spacing and offset are chosen per preset.
+ */
+export const segmentDefinition = z.union([
+  z.object({
+    ...definitionFields,
+    range: z.string().min(1),
+    /** Which run of the range, for ranges with several. */
+    span: z.number().int().min(0),
+    reverse: z.boolean(),
+  }),
+  z.object({
+    ...definitionFields,
+    /** A marker label, or an LED number. */
+    start: z.union([z.string().min(1), z.number().int().min(0)]),
+    end: z.discriminatedUnion("type", [
+      /** Runs towards the marker; includeEnd also lights the marker's own LED. */
+      z.object({ type: z.literal("marker"), label: z.string().min(1), includeEnd: z.boolean() }),
+      /** Runs towards the LED; includeEnd also lights that LED. */
+      z.object({ type: z.literal("led"), index: z.number().int().min(0), includeEnd: z.boolean() }),
+      /** Covers |count| LEDs from the start LED; a negative count runs backwards. */
+      z.object({ type: z.literal("length"), count: z.number().int().min(-10000).max(10000) }),
+    ]),
+  }),
+]);
+export type SegmentDefinition = z.infer<typeof segmentDefinition>;
+
 const controllerFields = {
   name: z.string().min(1).max(64),
   host: z.string().min(1),
@@ -152,6 +226,12 @@ export type ControllerStatus = z.infer<typeof controllerStatus>;
 export const controllerUpdate = z.object(controllerFields).partial().extend({
   layout: ledLayout.optional(),
   markers: z.array(ledMarker).max(500).optional(),
+  ranges: z.array(ledRange).max(200).optional(),
+  segments: z
+    .array(segmentDefinition)
+    .max(200)
+    .refine((defs) => new Set(defs.map((d) => d.id)).size === defs.length, { message: "segment IDs must be unique" })
+    .optional(),
 });
 export type ControllerUpdate = z.infer<typeof controllerUpdate>;
 
@@ -168,6 +248,8 @@ export const deviceSummary = z.object({
   customPaletteMax: z.number().int(),
   /** Device palette ID of /palette0.json; later slots count down from it. */
   customPaletteBase: z.number().int(),
+  /** Most segments the firmware supports. */
+  maxSegments: z.number().int(),
 });
 export type DeviceSummary = z.infer<typeof deviceSummary>;
 
@@ -180,6 +262,8 @@ export const controller = controllerInput.omit({ pin: true }).extend({
   lastError: z.string().nullable(),
   layout: ledLayout,
   markers: z.array(ledMarker),
+  ranges: z.array(ledRange),
+  segments: z.array(segmentDefinition),
 });
 export type Controller = z.infer<typeof controller>;
 
@@ -191,10 +275,26 @@ export const quickControl = z.object({
 });
 export type QuickControl = z.infer<typeof quickControl>;
 
+// ---- Settings ----
+
+export const MIN_POLL_INTERVAL_MS = 5_000;
+
+export const settings = z.object({
+  /** How often controllers are polled for status; 0 turns polling off. */
+  pollIntervalMs: z
+    .number()
+    .int()
+    .min(0)
+    .max(3_600_000)
+    .refine((ms) => ms === 0 || ms >= MIN_POLL_INTERVAL_MS, { message: "use 0 (off) or at least 5 seconds" }),
+});
+export type Settings = z.infer<typeof settings>;
+
 /** Events pushed to the UI over SSE. */
 export type ServerEvent =
   | { type: "controller.updated"; controllerId: string }
   | { type: "controller.removed"; controllerId: string }
   | { type: "palettes.changed" }
   | { type: "presets.changed" }
-  | { type: "sync.completed"; controllerId: string };
+  | { type: "sync.completed"; controllerId: string }
+  | { type: "settings.changed" };

@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import type { LedLayout, LedMarker } from "@wled-manager/shared";
+import type { LedLayout, LedMarker, LedRange } from "@wled-manager/shared";
 
 const CELL = 18;
 // Rows are taller than columns are wide, leaving room for index labels between rows.
@@ -37,39 +37,78 @@ export function ledPositions(count: number, layout: LedLayout) {
   return { points, width: columns * CELL + CELL, height: rows * ROW + ROW / 2 };
 }
 
+/** How a click changes the selection: Shift extends from the last click, Ctrl/Cmd adds or removes. */
+export interface SelectMods {
+  range: boolean;
+  toggle: boolean;
+}
+
 interface Props {
   count: number;
   layout: LedLayout;
   markers: LedMarker[];
+  /** Named in each LED's tooltip. */
+  ranges?: LedRange[];
+  /** The LED last clicked or stepped to. */
   current: number | null;
+  /** Selected LEDs, drawn lit in `color`. */
+  selected?: ReadonlySet<number>;
   color: string;
-  onSelect: (index: number) => void;
+  /** Per-LED fill, e.g. the segment an LED belongs to; unset LEDs are drawn dark. */
+  colors?: (string | undefined)[];
+  onSelect?: (index: number, mods: SelectMods) => void;
 }
 
 /** Clickable map of a controller's LEDs, with markers and the lit LED highlighted. */
-export const LedMap = memo(function LedMap({ count, layout, markers, current, color, onSelect }: Props) {
+export const LedMap = memo(function LedMap({ count, layout, markers, ranges, current, selected, color, colors, onSelect }: Props) {
   const { points, width, height } = useMemo(() => ledPositions(count, layout), [count, layout]);
   const markerAt = useMemo(() => new Map(markers.map((m) => [m.index, m.label])), [markers]);
+  const rangesAt = useMemo(() => {
+    const at = new Map<number, string[]>();
+    for (const r of ranges ?? [])
+      for (const s of r.spans) for (let i = s.start; i < s.stop; i++) at.set(i, [...(at.get(i) ?? []), r.label]);
+    return at;
+  }, [ranges]);
   const labelEvery = count > 400 ? 50 : count > 100 ? 25 : 10;
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="max-h-[70vh] w-full select-none" aria-label="LEDs">
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="max-h-[70vh] w-full select-none"
+      aria-label="LEDs"
+      // On macOS Ctrl-click opens the context menu; it's a selection click here.
+      onContextMenu={(e) => onSelect && e.ctrlKey && e.preventDefault()}
+    >
       {points.map((p, i) => {
         const marked = markerAt.has(i);
-        const lit = i === current;
+        const lit = selected ? selected.has(i) : i === current;
+        const focused = i === current;
+        const names = [markerAt.get(i), ...(rangesAt.get(i) ?? [])].filter(Boolean);
         return (
-          <g key={i} onClick={() => onSelect(i)} className="cursor-pointer">
-            <title>{`LED ${i}${marked ? ` · ${markerAt.get(i)}` : ""}`}</title>
+          <g
+            key={i}
+            // mousedown rather than click: macOS doesn't send click for Ctrl-click.
+            onMouseDown={
+              onSelect &&
+              ((e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                onSelect(i, { range: e.shiftKey, toggle: e.ctrlKey || e.metaKey });
+              })
+            }
+            className={onSelect ? "cursor-pointer" : ""}
+          >
+            <title>{`LED ${i}${names.length ? ` · ${names.join(", ")}` : ""}`}</title>
             {/* Larger invisible hit target than the dot itself. */}
             <circle cx={p.x} cy={p.y} r={CELL / 2} fill="transparent" />
             <circle
               cx={p.x}
               cy={p.y}
-              r={lit ? CELL * 0.45 : CELL * 0.28}
-              fill={lit ? color : "#3f3f46"}
-              stroke={marked ? "#f59e0b" : lit ? "#ffffff" : "none"}
-              strokeWidth={marked || lit ? 2 : 0}
-              className={lit ? "" : "hover:fill-neutral-400"}
+              r={lit ? CELL * 0.45 : colors?.[i] ? CELL * 0.34 : CELL * 0.28}
+              fill={lit ? color : (colors?.[i] ?? "#3f3f46")}
+              stroke={focused && lit ? "#ffffff" : marked ? "#f59e0b" : "none"}
+              strokeWidth={(focused && lit) || marked ? 2 : 0}
+              className={lit || !onSelect ? "" : "hover:fill-neutral-400"}
             />
             {i % labelEvery === 0 && (
               <text x={p.labelX} y={p.labelY} textAnchor="middle" fontSize={8} fill="#737373" pointerEvents="none">
