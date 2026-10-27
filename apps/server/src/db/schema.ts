@@ -1,5 +1,5 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import type { LedLayout, LedMarker, PaletteStop, PresetState } from "@wled-manager/shared";
+import type { LedLayout, LedMarker, PaletteStop, PresetState, SegmentPlanEntry } from "@wled-manager/shared";
 import type { WledInfo } from "../wled/client.js";
 
 const timestamps = {
@@ -25,6 +25,8 @@ export const controllers = sqliteTable("controllers", {
   /** LED locator drawing settings; null means the default layout. */
   layout: text("layout", { mode: "json" }).$type<LedLayout>(),
   markers: text("markers", { mode: "json" }).$type<LedMarker[]>().notNull().default([]),
+  /** Segments planned from markers in the segment builder. */
+  segmentPlan: text("segment_plan", { mode: "json" }).$type<SegmentPlanEntry[]>().notNull().default([]),
   ...timestamps,
 });
 

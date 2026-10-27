@@ -43,11 +43,13 @@ interface Props {
   markers: LedMarker[];
   current: number | null;
   color: string;
-  onSelect: (index: number) => void;
+  /** Per-LED fill, e.g. the segment an LED belongs to; unset LEDs are drawn dark. */
+  colors?: (string | undefined)[];
+  onSelect?: (index: number) => void;
 }
 
 /** Clickable map of a controller's LEDs, with markers and the lit LED highlighted. */
-export const LedMap = memo(function LedMap({ count, layout, markers, current, color, onSelect }: Props) {
+export const LedMap = memo(function LedMap({ count, layout, markers, current, color, colors, onSelect }: Props) {
   const { points, width, height } = useMemo(() => ledPositions(count, layout), [count, layout]);
   const markerAt = useMemo(() => new Map(markers.map((m) => [m.index, m.label])), [markers]);
   const labelEvery = count > 400 ? 50 : count > 100 ? 25 : 10;
@@ -58,18 +60,18 @@ export const LedMap = memo(function LedMap({ count, layout, markers, current, co
         const marked = markerAt.has(i);
         const lit = i === current;
         return (
-          <g key={i} onClick={() => onSelect(i)} className="cursor-pointer">
+          <g key={i} onClick={onSelect && (() => onSelect(i))} className={onSelect ? "cursor-pointer" : ""}>
             <title>{`LED ${i}${marked ? ` · ${markerAt.get(i)}` : ""}`}</title>
             {/* Larger invisible hit target than the dot itself. */}
             <circle cx={p.x} cy={p.y} r={CELL / 2} fill="transparent" />
             <circle
               cx={p.x}
               cy={p.y}
-              r={lit ? CELL * 0.45 : CELL * 0.28}
-              fill={lit ? color : "#3f3f46"}
+              r={lit ? CELL * 0.45 : colors?.[i] ? CELL * 0.34 : CELL * 0.28}
+              fill={lit ? color : (colors?.[i] ?? "#3f3f46")}
               stroke={marked ? "#f59e0b" : lit ? "#ffffff" : "none"}
               strokeWidth={marked || lit ? 2 : 0}
-              className={lit ? "" : "hover:fill-neutral-400"}
+              className={lit || !onSelect ? "" : "hover:fill-neutral-400"}
             />
             {i % labelEvery === 0 && (
               <text x={p.labelX} y={p.labelY} textAnchor="middle" fontSize={8} fill="#737373" pointerEvents="none">

@@ -130,6 +130,25 @@ export const DEFAULT_LED_LAYOUT: LedLayout = { type: "strip", columns: 50, serpe
 export const ledMarker = z.object({ index: z.number().int().min(0), label: z.string().min(1).max(40) });
 export type LedMarker = z.infer<typeof ledMarker>;
 
+/**
+ * A planned segment: it starts at a marker or an LED number and ends at another marker, an LED number, or
+ * after a number of LEDs. Markers are referenced by label so moving a marker moves the segments built on it.
+ */
+export const segmentPlanEntry = z.object({
+  name: z.string().max(32).optional(),
+  /** A marker label, or an LED number. */
+  start: z.union([z.string().min(1), z.number().int().min(0)]),
+  end: z.discriminatedUnion("type", [
+    /** Runs towards the marker; includeEnd also lights the marker's own LED. */
+    z.object({ type: z.literal("marker"), label: z.string().min(1), includeEnd: z.boolean() }),
+    /** Runs towards the LED; includeEnd also lights that LED. */
+    z.object({ type: z.literal("led"), index: z.number().int().min(0), includeEnd: z.boolean() }),
+    /** Covers |count| LEDs from the start LED; a negative count runs backwards. */
+    z.object({ type: z.literal("length"), count: z.number().int().min(-10000).max(10000) }),
+  ]),
+});
+export type SegmentPlanEntry = z.infer<typeof segmentPlanEntry>;
+
 const controllerFields = {
   name: z.string().min(1).max(64),
   host: z.string().min(1),
@@ -152,6 +171,7 @@ export type ControllerStatus = z.infer<typeof controllerStatus>;
 export const controllerUpdate = z.object(controllerFields).partial().extend({
   layout: ledLayout.optional(),
   markers: z.array(ledMarker).max(500).optional(),
+  segmentPlan: z.array(segmentPlanEntry).max(32).optional(),
 });
 export type ControllerUpdate = z.infer<typeof controllerUpdate>;
 
@@ -168,6 +188,8 @@ export const deviceSummary = z.object({
   customPaletteMax: z.number().int(),
   /** Device palette ID of /palette0.json; later slots count down from it. */
   customPaletteBase: z.number().int(),
+  /** Most segments the firmware supports. */
+  maxSegments: z.number().int(),
 });
 export type DeviceSummary = z.infer<typeof deviceSummary>;
 
@@ -180,6 +202,7 @@ export const controller = controllerInput.omit({ pin: true }).extend({
   lastError: z.string().nullable(),
   layout: ledLayout,
   markers: z.array(ledMarker),
+  segmentPlan: z.array(segmentPlanEntry),
 });
 export type Controller = z.infer<typeof controller>;
 

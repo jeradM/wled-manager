@@ -7,6 +7,7 @@ import type { EventBus } from "../events.js";
 import {
   customPaletteBase,
   DEFAULT_CUSTOM_PALETTE_MAX,
+  DEFAULT_MAX_SEGMENTS,
   WledClient,
   type WledClientOptions,
   type WledInfo,
@@ -30,6 +31,7 @@ export function toController(row: ControllerRow): Controller {
     lastError: row.lastError,
     layout: row.layout ?? DEFAULT_LED_LAYOUT,
     markers: [...row.markers].sort((a, b) => a.index - b.index),
+    segmentPlan: row.segmentPlan,
     device: info
       ? {
           version: info.ver,
@@ -42,6 +44,7 @@ export function toController(row: ControllerRow): Controller {
           customPaletteCount: info.cpalcount ?? 0,
           customPaletteMax: info.cpalmax ?? DEFAULT_CUSTOM_PALETTE_MAX,
           customPaletteBase: customPaletteBase(info),
+          maxSegments: info.leds.maxseg ?? DEFAULT_MAX_SEGMENTS,
         }
       : null,
   };

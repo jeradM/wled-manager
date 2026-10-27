@@ -205,7 +205,7 @@ export function Locator() {
             </form>
             {ranges.length === 0 ? (
               <p className="text-xs text-neutral-500">
-                Label positions like corners or the start of a run. Markers are suggested as segment start/stop in the preset editor.
+                Label positions like corners or the start of a run. Build segments between markers on the Segments page.
               </p>
             ) : (
               <ul className="flex flex-col divide-y divide-neutral-800">

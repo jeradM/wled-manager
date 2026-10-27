@@ -180,6 +180,21 @@ export function useSavePreset(id?: string) {
   });
 }
 
+/** Saves to whichever preset is given at call time (or creates one), for pages that edit several. */
+export function useWritePreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id?: string; input: PresetInput }) =>
+      id
+        ? api<Preset>(`/presets/${id}`, { method: "PUT", body: JSON.stringify(input) })
+        : api<Preset>("/presets", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: (p) => {
+      qc.setQueryData(keys.preset(p.id), p);
+      void qc.invalidateQueries({ queryKey: keys.presets });
+    },
+  });
+}
+
 export function useDeletePreset() {
   const qc = useQueryClient();
   return useMutation({

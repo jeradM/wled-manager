@@ -6,6 +6,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Controllers } from "./pages/Controllers";
 import { ControllerDetail } from "./pages/ControllerDetail";
 import { Locator } from "./pages/Locator";
+import { SegmentBuilder } from "./pages/SegmentBuilder";
 import { Palettes } from "./pages/Palettes";
 import { EditPalette, NewPalette } from "./pages/PaletteEditor";
 import { Presets } from "./pages/Presets";
@@ -68,6 +69,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/controllers", component: Controllers }),
   createRoute({ getParentRoute: () => rootRoute, path: "/controllers/$id", component: ControllerDetail }),
   createRoute({ getParentRoute: () => rootRoute, path: "/controllers/$id/locate", component: Locator }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/controllers/$id/segments", component: SegmentBuilder }),
   createRoute({ getParentRoute: () => rootRoute, path: "/palettes", component: Palettes }),
   createRoute({ getParentRoute: () => rootRoute, path: "/palettes/new", component: NewPalette }),
   createRoute({ getParentRoute: () => rootRoute, path: "/palettes/$id", component: EditPalette }),

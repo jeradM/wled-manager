@@ -39,6 +39,9 @@ export function ControllerDetail() {
             <Link to="/controllers/$id/locate" params={{ id: c.id }}>
               <Button disabled={c.status !== "online"}>Locate LEDs</Button>
             </Link>
+            <Link to="/controllers/$id/segments" params={{ id: c.id }}>
+              <Button>Segments</Button>
+            </Link>
             <Button onClick={() => setImporting(true)} disabled={importing || c.status !== "online"}>
               Import from controller
             </Button>

@@ -36,6 +36,13 @@
       "when": 1793050889203,
       "tag": "0004_locator",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793063131790,
+      "tag": "0005_segment_plan",
+      "breakpoints": true
     }
   ]
 }

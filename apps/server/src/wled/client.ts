@@ -14,7 +14,7 @@ export const wledInfo = z.looseObject({
   cpalmax: z.number().optional(),
   /** Only reported by firmware that numbers custom palettes down from 200 (upstream WLED main). */
   umpalcount: z.number().optional(),
-  leds: z.looseObject({ count: z.number(), rgbw: z.boolean().optional() }),
+  leds: z.looseObject({ count: z.number(), rgbw: z.boolean().optional(), maxseg: z.number().optional() }),
 });
 export type WledInfo = z.infer<typeof wledInfo>;
 
@@ -23,6 +23,8 @@ export type WledFile = z.infer<typeof wledFile>;
 
 /** Firmware without cpalmax in /json/info (upstream 0.14/0.15) supports 10 custom palettes. */
 export const DEFAULT_CUSTOM_PALETTE_MAX = 10;
+/** Segment limit when /json/info doesn't report maxseg (the ESP32 default). */
+export const DEFAULT_MAX_SEGMENTS = 32;
 
 /** True for firmware with the newer palette scheme: IDs 200 - N and the rmcpal command. */
 export const hasModernPalettes = (info: WledInfo) => info.umpalcount !== undefined;

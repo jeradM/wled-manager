@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { presetState, type PresetInput, type PresetState, type Segment } from "@wled-manager/shared";
 import {
   useCatalog,
@@ -12,7 +12,7 @@ import {
   useSavePreset,
 } from "../queries";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
-import { isClearMarker, rawKind } from "../components/preset/describe";
+import { isClearMarker, newSegment, rawKind } from "../components/preset/describe";
 import { TRANSITION_STYLES } from "../components/preset/wled-options";
 import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
 
@@ -24,15 +24,6 @@ export function EditPreset() {
   const { id } = useParams({ from: "/presets/$id" });
   return <PresetEditor id={id} />;
 }
-
-const newSegment = (rgbw: boolean): Segment => ({
-  fx: 0,
-  fxName: "Solid",
-  sx: 128,
-  ix: 128,
-  col: [rgbw ? [255, 160, 0, 0] : [255, 160, 0]],
-  pal: 0,
-});
 
 function PresetEditor({ id }: { id?: string }) {
   const { data: existing, error: loadError } = usePreset(id);
@@ -221,6 +212,15 @@ function PresetEditor({ id }: { id?: string }) {
                   )}
                   <div className="flex items-center gap-3">
                     <Button onClick={addSegment}>Add segment</Button>
+                    {sourceController && (
+                      <Link
+                        to="/controllers/$id/segments"
+                        params={{ id: sourceController.id }}
+                        className="text-xs text-sky-400 hover:underline"
+                      >
+                        Build segments from markers
+                      </Link>
+                    )}
                     {markers > 0 && (
                       <span className="text-xs text-neutral-500">
                         Loading this preset also turns off {markers} other segment{markers === 1 ? "" : "s"}.

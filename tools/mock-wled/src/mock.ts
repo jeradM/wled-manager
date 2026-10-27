@@ -47,7 +47,7 @@ export function createMockWled({
     ver: version,
     name,
     product: "Mock",
-    leds: { count: ledCount, rgbw },
+    leds: { count: ledCount, rgbw, maxseg: 32 },
     arch: "esp32",
     mac: "aabbccddeeff",
     fxcount: EFFECTS.length,

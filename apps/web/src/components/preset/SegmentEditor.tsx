@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { LedMarker, Palette, Segment } from "@wled-manager/shared";
 import type { Catalog } from "../../queries";
 import { ColorField } from "./ColorField";
+import { EffectPicker } from "./EffectPicker";
 import { PalettePicker } from "./PalettePicker";
 import { ALL_CONTROLS, parseFxData } from "./fxdata";
 import { BLEND_MODES } from "./wled-options";
@@ -46,23 +47,16 @@ export function SegmentEditor({ index, segment: s, catalog, library, rgbw, marke
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-        <label className="col-span-2 flex flex-col gap-1">
+        <div className="col-span-2 flex flex-col gap-1">
           <span className="text-xs text-neutral-400">Effect</span>
-          <select
-            value={fx ?? ""}
-            onChange={(e) => {
-              const id = Number(e.target.value);
-              set({ fx: id, fxName: effects[id] });
-            }}
-            className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
-          >
-            {fx === undefined && <option value="">(unchanged)</option>}
-            {fx !== undefined && fx >= effects.length && <option value={fx}>{s.fxName ?? `Effect ${fx}`}</option>}
-            {effects.map((name, id) => (
-              <option key={id} value={id}>{name}</option>
-            ))}
-          </select>
-        </label>
+          <EffectPicker
+            value={fx}
+            savedName={s.fxName}
+            effects={effects}
+            fxdata={catalog?.fxdata}
+            onChange={(id, name) => set({ fx: id, fxName: name })}
+          />
+        </div>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-neutral-400">Start LED</span>
           <input

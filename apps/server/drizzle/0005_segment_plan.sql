@@ -1,0 +1,1 @@
+ALTER TABLE `controllers` ADD `segment_plan` text DEFAULT '[]' NOT NULL;

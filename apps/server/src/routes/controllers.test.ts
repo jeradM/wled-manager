@@ -99,6 +99,24 @@ describe("controllers API", () => {
     expect(res.json<Controller>()).toMatchObject({ name: "Porch", port: mock.port, tags: ["outdoor"] });
   });
 
+  it("stores a segment plan and reports the segment limit", async () => {
+    const c = (await add({ name: "Porch", host: mock.host, port: mock.port })).json<Controller>();
+    expect(c.segmentPlan).toEqual([]);
+    expect(c.device?.maxSegments).toBe(32);
+    const segmentPlan = [
+      { name: "Roof", start: "A", end: { type: "marker", label: "B", includeEnd: false } },
+      { start: "B", end: { type: "length", count: -10 } },
+    ];
+    const res = await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: { segmentPlan } });
+    expect(res.json<Controller>().segmentPlan).toEqual(segmentPlan);
+    const bad = await t.app.inject({
+      method: "PATCH",
+      url: `/api/controllers/${c.id}`,
+      payload: { segmentPlan: [{ start: "A", end: { type: "length" } }] },
+    });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it("updates and deletes", async () => {
     const c = (await add({ name: "Porch", host: mock.host, port: mock.port })).json<Controller>();
     const patched = await t.app.inject({ method: "PATCH", url: `/api/controllers/${c.id}`, payload: { name: "Front" } });
