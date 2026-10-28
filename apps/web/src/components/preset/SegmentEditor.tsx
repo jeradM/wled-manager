@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import type { LedMarker, Palette, Segment } from "@wled-manager/shared";
 import type { Catalog } from "../../queries";
 import { ColorField } from "./ColorField";
@@ -220,7 +221,18 @@ export function SegmentEditor({
           <PalettePicker value={s.pal} builtins={catalog?.palettes ?? []} library={library} onChange={(pal) => set({ pal })} />
         </div>
         <label className="flex flex-col">
-          <span className="text-xs text-neutral-400">Blend mode</span>
+          <span className="flex justify-between text-xs text-neutral-400">
+            Blend mode
+            <Link
+              to="/simulator/blend-modes"
+              hash={s.bm !== undefined ? `bm-${s.bm}` : undefined}
+              target="_blank"
+              title="What each blend mode does (opens in a new tab)"
+              className="text-sky-400 hover:text-sky-300"
+            >
+              ?
+            </Link>
+          </span>
           <select
             value={s.bm ?? ""}
             onChange={(e) => set({ bm: e.target.value === "" ? undefined : Number(e.target.value) })}

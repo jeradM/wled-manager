@@ -12,6 +12,8 @@ import { EditPalette, NewPalette } from "./pages/PaletteEditor";
 import { Presets } from "./pages/Presets";
 import { EditPreset, NewPreset } from "./pages/PresetEditor";
 import { Settings } from "./pages/Settings";
+import { Simulator } from "./pages/Simulator";
+import { BlendModes } from "./pages/BlendModes";
 
 function HealthDot() {
   const { isSuccess } = useQuery({
@@ -32,6 +34,7 @@ const nav = [
   { to: "/controllers", label: "Controllers" },
   { to: "/palettes", label: "Palettes" },
   { to: "/presets", label: "Presets" },
+  { to: "/simulator", label: "Simulator" },
   { to: "/settings", label: "Settings" },
 ] as const;
 
@@ -84,6 +87,14 @@ const routeTree = rootRoute.addChildren([
     validateSearch: (s: Record<string, unknown>): { folder?: string } => (typeof s.folder === "string" && s.folder ? { folder: s.folder } : {}),
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/presets/$id", component: EditPreset }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/simulator",
+    component: Simulator,
+    // The preset loaded into the simulator.
+    validateSearch: (s: Record<string, unknown>): { preset?: string } => (typeof s.preset === "string" && s.preset ? { preset: s.preset } : {}),
+  }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/simulator/blend-modes", component: BlendModes }),
   createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: Settings }),
 ]);
 

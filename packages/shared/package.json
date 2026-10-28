@@ -2,7 +2,7 @@
   "name": "@wled-manager/shared",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
+  "exports": { ".": "./src/index.ts", "./sim": "./src/sim/index.ts" },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc -p ."

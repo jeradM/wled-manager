@@ -401,6 +401,11 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
         actions={
           <>
             {id && <Button variant="danger" onClick={remove}>Delete</Button>}
+            {id && draft.kind === "state" && (
+              <Button onClick={() => navigate({ to: "/simulator", search: { preset: id } })} title="Try this preset on simulated LEDs">
+                Simulate
+              </Button>
+            )}
             <Button onClick={() => navigate({ to: "/presets" })}>Cancel</Button>
             <Button variant="primary" onClick={submit} disabled={save.isPending || !draft.name.trim() || !!slotTaken}>
               Save
