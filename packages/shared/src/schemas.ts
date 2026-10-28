@@ -120,6 +120,12 @@ export const segmentGroup = z.object({
 });
 export type SegmentGroup = z.infer<typeof segmentGroup>;
 
+export const presetFolder = z.string().trim().min(1).max(40);
+
+/** Moves presets into a group (folder), or out of any (null). */
+export const presetFolderMove = z.object({ ids: z.array(z.string()).min(1).max(250), folder: presetFolder.nullable() });
+export type PresetFolderMove = z.infer<typeof presetFolderMove>;
+
 const presetFields = {
   slot: z.number().int().min(1).max(250),
   name: z.string().min(1).max(64),
@@ -129,6 +135,8 @@ const presetFields = {
   state: presetState.optional(),
   raw: z.record(z.string(), z.unknown()).optional(),
   groups: z.array(segmentGroup).max(32).optional(),
+  /** Group the preset is listed under in the app, for organizing only; controllers never see it. */
+  folder: presetFolder.optional(),
   /**
    * Controllers the preset syncs to; absent means all of them. Either way, a preset using defined segments
    * only syncs to controllers where at least one of them is defined.

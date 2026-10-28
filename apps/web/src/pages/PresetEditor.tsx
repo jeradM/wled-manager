@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import {
   applyGroupEdit,
   definitionLabel,
@@ -41,7 +41,8 @@ const GROUP_COLORS = ["#38bdf8", "#f472b6", "#a3e635", "#fbbf24", "#c084fc", "#2
 const groupColor = (k: number) => GROUP_COLORS[k % GROUP_COLORS.length]!;
 
 export function NewPreset() {
-  return <PresetEditor />;
+  const { folder } = useSearch({ from: "/presets/new" });
+  return <PresetEditor folder={folder} />;
 }
 
 export function EditPreset() {
@@ -49,7 +50,7 @@ export function EditPreset() {
   return <PresetEditor id={id} />;
 }
 
-function PresetEditor({ id }: { id?: string }) {
+function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
   const { data: existing, error: loadError } = usePreset(id);
   const { data: allPresets = [], isSuccess: presetsLoaded } = usePresets();
   const { data: palettes = [] } = usePalettes();
@@ -84,7 +85,7 @@ function PresetEditor({ id }: { id?: string }) {
     } else if (!id && !draft && presetsLoaded) {
       // New presets turn the controller's other segments off, so only the segments added here show.
       const seg = Array.from({ length: 32 }, (_, id) => ({ id, stop: 0 }));
-      setDraft({ slot: freeSlot, name: "", kind: "state", state: { on: true, bri: 128, transition: 7, seg } });
+      setDraft({ slot: freeSlot, name: "", kind: "state", state: { on: true, bri: 128, transition: 7, seg }, ...(folder ? { folder } : {}) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existing, id, presetsLoaded]);
@@ -373,6 +374,7 @@ function PresetEditor({ id }: { id?: string }) {
       </div>
     );
   };
+  const folders = [...new Set(allPresets.flatMap((p) => (p.folder ? [p.folder] : [])))].sort((a, b) => a.localeCompare(b));
   const slotTaken = allPresets.find((p) => p.slot === draft.slot && p.id !== id);
 
   const submit = () => {
@@ -385,7 +387,7 @@ function PresetEditor({ id }: { id?: string }) {
         return s.sid && r?.ok ? linkSegment(s, s.sid, r.segment) : s;
       }),
     });
-    save.mutate({ ...draft, name: draft.name.trim(), state }, { onSuccess: () => navigate({ to: "/presets" }) });
+    save.mutate({ ...draft, name: draft.name.trim(), folder: draft.folder?.trim() || undefined, state }, { onSuccess: () => navigate({ to: "/presets" }) });
   };
   const remove = () => {
     if (existing && confirm(`Delete preset "${existing.name}"? Controllers lose it on their next sync.`))
@@ -411,8 +413,22 @@ function PresetEditor({ id }: { id?: string }) {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_18rem]">
         <div className="flex flex-col gap-4">
           <Card>
-            <div className="grid grid-cols-[1fr_6rem_5rem] gap-3">
+            <div className="grid grid-cols-[1fr_10rem_6rem_5rem] gap-3">
               <Input label="Name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} autoFocus={!id} />
+              <Input
+                label="Preset group"
+                value={draft.folder ?? ""}
+                list="preset-folders"
+                maxLength={40}
+                placeholder="None"
+                title="Groups only organize the presets list in this app; controllers never see them."
+                onChange={(e) => setDraft({ ...draft, folder: e.target.value.trim() ? e.target.value : undefined })}
+              />
+              <datalist id="preset-folders">
+                {folders.map((f) => (
+                  <option key={f} value={f} />
+                ))}
+              </datalist>
               <Input
                 label="Slot (1–250)"
                 type="number"

@@ -56,6 +56,8 @@ export const presets = sqliteTable("presets", {
   raw: text("raw", { mode: "json" }).$type<Record<string, unknown>>(),
   /** Segment groups for the editor; never sent to controllers. */
   groups: text("groups", { mode: "json" }).$type<SegmentGroup[]>(),
+  /** Group the preset is listed under in the app; never sent to controllers. */
+  folder: text("folder"),
   /** Controllers the preset syncs to; null means all. */
   controllerIds: text("controller_ids", { mode: "json" }).$type<string[]>(),
   revision: integer("revision").notNull().default(1),

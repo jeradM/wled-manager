@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import type { Preset, PresetInput } from "@wled-manager/shared";
 import type { Db } from "../db/index.js";
 import { presets } from "../db/schema.js";
@@ -19,6 +19,7 @@ const toPreset = (row: PresetRow): Preset => ({
   ...(row.state ? { state: row.state } : {}),
   ...(row.raw ? { raw: row.raw } : {}),
   ...(row.groups?.length ? { groups: row.groups } : {}),
+  ...(row.folder ? { folder: row.folder } : {}),
   ...(row.controllerIds?.length ? { controllers: row.controllerIds } : {}),
   revision: row.revision,
   updatedAt: row.updatedAt,
@@ -33,6 +34,7 @@ const columns = (input: PresetInput) => ({
   state: input.kind === "state" ? input.state! : null,
   raw: input.kind === "raw" ? input.raw! : null,
   groups: input.kind === "state" && input.groups?.length ? input.groups : null,
+  folder: input.folder ?? null,
   controllerIds: input.controllers?.length ? input.controllers : null,
 });
 
@@ -77,10 +79,23 @@ export class PresetService {
     return toPreset(row);
   }
 
-  /** Creates the preset, or replaces whatever preset occupies its slot. */
+  /** Creates the preset, or replaces whatever preset occupies its slot (staying in that preset's group). */
   upsertBySlot(input: PresetInput): Preset {
     const existing = this.bySlot(input.slot);
-    return existing ? this.update(existing.id, input) : this.create(input);
+    if (!existing) return this.create(input);
+    return this.update(existing.id, { ...input, folder: input.folder ?? existing.folder });
+  }
+
+  /** Puts presets in a group, or in none (null). Renaming a group moves all of its presets. */
+  setFolder(ids: string[], folder: string | null): Preset[] {
+    const rows = this.db
+      .update(presets)
+      .set({ folder, updatedAt: new Date().toISOString() })
+      .where(inArray(presets.id, ids))
+      .returning()
+      .all();
+    this.events.publish({ type: "presets.changed" });
+    return rows.map(toPreset);
   }
 
   remove(id: string) {

@@ -76,7 +76,13 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/palettes/new", component: NewPalette }),
   createRoute({ getParentRoute: () => rootRoute, path: "/palettes/$id", component: EditPalette }),
   createRoute({ getParentRoute: () => rootRoute, path: "/presets", component: Presets }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/presets/new", component: NewPreset }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/presets/new",
+    component: NewPreset,
+    // The group to start the new preset in, from a group's "+ New preset" link.
+    validateSearch: (s: Record<string, unknown>): { folder?: string } => (typeof s.folder === "string" && s.folder ? { folder: s.folder } : {}),
+  }),
   createRoute({ getParentRoute: () => rootRoute, path: "/presets/$id", component: EditPreset }),
   createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: Settings }),
 ]);

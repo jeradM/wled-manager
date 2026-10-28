@@ -1,0 +1,1 @@
+ALTER TABLE `presets` ADD `folder` text;

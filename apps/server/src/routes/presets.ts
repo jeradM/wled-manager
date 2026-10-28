@@ -1,6 +1,6 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { preset, presetInput } from "@wled-manager/shared";
+import { preset, presetFolderMove, presetInput } from "@wled-manager/shared";
 import { customPaletteBase } from "../wled/client.js";
 
 const params = z.object({ id: z.string() });
@@ -12,6 +12,13 @@ export const presetRoutes: FastifyPluginAsyncZod = async (app) => {
 
   app.post("/presets", { schema: { body: presetInput, response: { 201: preset } } }, async (req, reply) =>
     reply.code(201).send(svc.create(req.body)),
+  );
+
+  /** Moves presets into a group (or out of any); groups only organize the app's list. */
+  app.post(
+    "/presets/folder",
+    { schema: { body: presetFolderMove, response: { 200: z.array(preset) } } },
+    async (req) => svc.setFolder(req.body.ids, req.body.folder),
   );
 
   app.get("/presets/:id", { schema: { params, response: { 200: preset } } }, async (req) => svc.get(req.params.id));

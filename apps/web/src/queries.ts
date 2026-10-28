@@ -221,6 +221,19 @@ export function useWritePreset() {
   });
 }
 
+/** Moves presets into a group, or out of any (null). */
+export function useMovePresets() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { ids: string[]; folder: string | null }) =>
+      api<Preset[]>("/presets/folder", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: (updated) => {
+      for (const p of updated) qc.setQueryData(keys.preset(p.id), p);
+      void qc.invalidateQueries({ queryKey: keys.presets });
+    },
+  });
+}
+
 export function useDeletePreset() {
   const qc = useQueryClient();
   return useMutation({
