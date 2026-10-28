@@ -4,6 +4,7 @@ import {
   applyGroupEdit,
   definitionLabel,
   groupSets,
+  joinGroup,
   linkSegment,
   litLeds,
   moveSegment,
@@ -90,6 +91,7 @@ function PresetEditor({ id }: { id?: string }) {
 
   const [jsonMode, setJsonMode] = useState(false);
   const [openGroup, setOpenGroup] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   // Drag and drop: segments are dragged by their handle (so inputs stay usable) and dropped on another segment.
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
@@ -121,7 +123,14 @@ function PresetEditor({ id }: { id?: string }) {
     setDraft({ ...draft, state: moved.state, groups: moved.groups });
   };
   const realPositions = segments.flatMap((s, p) => (isClearMarker(s) ? [] : [p]));
-  const neighbor = (i: number, delta: number) => realPositions[realPositions.indexOf(i) + delta];
+  const membersOf = (k: number) => realPositions.filter((p) => groups[k]!.members.includes(p));
+  const ungrouped = realPositions.filter((p) => groupIndexOf(p) === -1);
+  /** The segment before or after `i` in its group, or among the ungrouped ones. */
+  const neighbor = (i: number, delta: number) => {
+    const k = groupIndexOf(i);
+    const list = k >= 0 ? membersOf(k) : ungrouped;
+    return list[list.indexOf(i) + delta];
+  };
   const definitions = sourceController?.segments ?? [];
   const maxSegments = sourceController?.device?.maxSegments ?? 32;
   /** Where a segment's defined segment lands on the selected controller. */
@@ -148,46 +157,221 @@ function PresetEditor({ id }: { id?: string }) {
     const r = resolveRef(sid);
     return r.ok ? linkSegment({ grp: 1, spc: 0, of: 0, ...base }, sid, r.segment) : undefined;
   };
-  /** Puts segment `i` in group `k` (out of any other), or in no group (null), or a new group ("new"). */
+  /**
+   * Puts segment `i` in group `k` (out of any other), or in no group (null), or a new group ("new"). Joining an
+   * existing group gives it the group's settings.
+   */
   const setSegmentGroup = (i: number, k: number | null | "new") => {
-    const without = groups.map((g) => ({ ...g, members: g.members.filter((m) => m !== i) }));
     if (k === "new") {
-      setGroups([...without, { name: `Group ${groups.length + 1}`, members: [i] }]);
+      setGroups([...joinGroup(segments, groups, i, null).groups, { name: `Group ${groups.length + 1}`, members: [i] }]);
       setOpenGroup(groups.length);
     } else {
-      setGroups(k === null ? without : without.map((g, j) => (j === k ? { ...g, members: [...g.members, i].sort((a, b) => a - b) } : g)));
+      const next = joinGroup(segments, groups, i, k);
+      setDraft({ ...draft, state: { ...draft.state!, seg: next.seg }, groups: next.groups });
     }
+  };
+  /** Dropping a segment on another moves it there, into the other segment's group (or out of groups). */
+  const dropOn = (from: number, to: number) => {
+    const k = groupIndexOf(to);
+    const moved = moveSegment(draft.state!, groups, from, to);
+    if (k === groupIndexOf(from)) return setDraft({ ...draft, state: moved.state, groups: moved.groups });
+    const next = joinGroup(moved.state.seg, moved.groups, realPositions.indexOf(to), k === -1 ? null : k);
+    setDraft({ ...draft, state: { ...moved.state, seg: next.seg }, groups: next.groups });
+  };
+  const toggleCollapsed = (k: number, open?: boolean) => {
+    const next = new Set(collapsed);
+    if (open ?? next.has(k)) next.delete(k);
+    else next.add(k);
+    setCollapsed(next);
+  };
+  const deleteGroup = (k: number) => {
+    setGroups(groups.filter((_, j) => j !== k));
+    setOpenGroup(null);
+    setCollapsed(new Set([...collapsed].flatMap((j) => (j < k ? [j] : j > k ? [j - 1] : []))));
   };
   const endDrag = () => {
     setDragFrom(null);
     setDragOver(null);
   };
-  /** Adds segments, each taking the first clear marker's place, or at the end. */
-  const addSegments = (added: Segment[]) => {
-    const seg = [...segments];
+  /** Adds segments, each taking the first clear marker's place, or at the end; into group `k` if given. */
+  const addSegments = (added: Segment[], k?: number) => {
+    let seg = [...segments];
+    let nextGroups = groups;
+    const at: number[] = [];
     for (const x of added) {
-      const at = seg.findIndex(isClearMarker);
-      if (at === -1) seg.push(x);
-      else seg[at] = x;
+      const p = seg.findIndex(isClearMarker);
+      if (p === -1) seg.push(x);
+      else seg[p] = x;
+      at.push(p === -1 ? seg.length - 1 : p);
     }
-    setDraft({ ...draft, state: renumberSegments({ ...draft.state!, seg: seg.slice(0, 32) }) });
+    seg = seg.slice(0, 32);
+    if (k !== undefined)
+      for (const p of at.filter((p) => p < seg.length)) ({ seg, groups: nextGroups } = joinGroup(seg, nextGroups, p, k));
+    setDraft({ ...draft, state: renumberSegments({ ...draft.state!, seg }), groups: nextGroups });
   };
-  const onAdd = (v: string) => {
-    if (v === "custom") addSegments([newSegment(rgbw)]);
+  const onAdd = (v: string, k?: number) => {
+    if (v === "custom") addSegments([newSegment(rgbw)], k);
     else if (v === "all")
-      addSegments(definitions.filter((d) => !usedSids.has(d.id)).flatMap((d): Segment[] => {
-        const seg = fromDefinition(d.id, newSegment(rgbw));
-        return seg ? [seg] : [];
-      }));
+      addSegments(
+        definitions.filter((d) => !usedSids.has(d.id)).flatMap((d): Segment[] => {
+          const seg = fromDefinition(d.id, newSegment(rgbw));
+          return seg ? [seg] : [];
+        }),
+        k,
+      );
     else {
       const seg = fromDefinition(v, newSegment(rgbw));
-      if (seg) addSegments([seg]);
+      if (seg) addSegments([seg], k);
     }
   };
+  /** The "+ Add segment…" picker; inside a group, added segments join it. */
+  const addPicker = (k?: number) => (
+    <select
+      value=""
+      onChange={(e) => onAdd(e.target.value, k)}
+      disabled={realCount >= maxSegments}
+      aria-label={k === undefined ? "Add segment" : `Add segment to ${groups[k]!.name}`}
+      className={
+        k === undefined
+          ? "rounded-md border border-neutral-700 bg-neutral-800 px-2.5 py-1.5 text-sm hover:bg-neutral-700"
+          : "w-fit rounded-md border border-dashed border-neutral-700 bg-transparent px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800"
+      }
+    >
+      <option value="" disabled>{k === undefined ? "+ Add segment…" : `+ Add segment to ${groups[k]!.name}…`}</option>
+      {definitions.length > 0 && (
+        <optgroup label={`Defined on ${sourceController!.name}`}>
+          {definitions.map((d, j) => (
+            <option key={d.id} value={d.id} disabled={usedSids.has(d.id) || !resolveRef(d.id).ok}>
+              {definitionLabel(d, j)}
+              {usedSids.has(d.id) ? " (added)" : !resolveRef(d.id).ok ? " (doesn't fit)" : ""}
+            </option>
+          ))}
+          {definitions.filter((d) => !usedSids.has(d.id)).length > 1 && <option value="all">All not yet added</option>}
+        </optgroup>
+      )}
+      <option value="custom">Custom LEDs</option>
+    </select>
+  );
   const realCount = segments.length - markers;
   const toggleClearOthers = (on: boolean) => {
     const next = setClearOthers(draft.state!, groups, on, Math.max(maxSegments, realCount));
     setDraft({ ...draft, state: next.state, groups: next.groups });
+  };
+  /** One segment's card, draggable onto other segments. */
+  const segmentCard = (i: number) => {
+    const s = segments[i]!;
+    const k = groupIndexOf(i);
+    const dropHere = dragFrom !== null && dragOver === i && dragFrom !== i;
+    return (
+      <div
+        key={i}
+        onDragOver={(e) => {
+          if (dragFrom === null) return;
+          e.preventDefault();
+          setDragOver(i);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (dragFrom !== null && dragFrom !== i) dropOn(dragFrom, i);
+          endDrag();
+        }}
+        data-segment
+        className={`rounded-lg ${dragFrom === i ? "opacity-40" : ""} ${
+          dropHere ? (dragFrom! < i ? "shadow-[0_3px_0_0_#0ea5e9]" : "shadow-[0_-3px_0_0_#0ea5e9]") : ""
+        }`}
+      >
+        <SegmentEditor
+          index={i}
+          segment={s}
+          catalog={catalog}
+          library={palettes}
+          rgbw={rgbw}
+          markers={sourceController?.markers ?? []}
+          title={
+            <>
+              {segmentLabel(i)}
+              {s.sid && <span className="text-xs font-normal text-neutral-500">segment {s.id ?? i}</span>}
+            </>
+          }
+          hideGeometry={!!s.sid}
+          source={
+            <SourcePicker
+              segment={s}
+              resolution={resolutions[i]}
+              controller={sourceController}
+              usedSids={usedSids}
+              onLink={(sid) => {
+                const next = fromDefinition(sid, s);
+                if (next) setSegment(i, next);
+              }}
+              onUnlink={() => {
+                const { sid: _, ...rest } = s;
+                setSegment(i, rest);
+              }}
+            />
+          }
+          onChange={(next) => setSegment(i, next)}
+          onRemove={() => removeSegment(i)}
+          leading={
+            <span className="flex items-center">
+              <span
+                role="button"
+                aria-label="Drag to reorder"
+                title="Drag to reorder"
+                draggable
+                onDragStart={(e) => {
+                  setDragFrom(i);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", String(i));
+                  // Show the whole segment card under the pointer, not just the handle.
+                  const card = e.currentTarget.closest("[data-segment]");
+                  if (card) e.dataTransfer.setDragImage(card, 24, 16);
+                }}
+                onDragEnd={endDrag}
+                className="cursor-grab px-1 text-neutral-500 select-none hover:text-neutral-200 active:cursor-grabbing"
+              >
+                ⠿
+              </span>
+              <button
+                type="button"
+                aria-label="Move up"
+                disabled={neighbor(i, -1) === undefined}
+                onClick={() => move(i, neighbor(i, -1)!)}
+                className="px-0.5 text-xs text-neutral-500 hover:text-neutral-200 disabled:opacity-30"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                aria-label="Move down"
+                disabled={neighbor(i, 1) === undefined}
+                onClick={() => move(i, neighbor(i, 1)!)}
+                className="px-0.5 text-xs text-neutral-500 hover:text-neutral-200 disabled:opacity-30"
+              >
+                ↓
+              </button>
+            </span>
+          }
+          headerExtra={
+            <select
+              value={k >= 0 ? String(k) : ""}
+              aria-label="Group"
+              onChange={(e) =>
+                setSegmentGroup(i, e.target.value === "" ? null : e.target.value === "new" ? "new" : Number(e.target.value))
+              }
+              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-xs"
+              style={k >= 0 ? { color: groupColor(k) } : undefined}
+            >
+              <option value="">No group</option>
+              {groups.map((g, j) => (
+                <option key={j} value={j}>{g.name}</option>
+              ))}
+              <option value="new">New group…</option>
+            </select>
+          }
+        />
+      </div>
+    );
   };
   const slotTaken = allPresets.find((p) => p.slot === draft.slot && p.id !== id);
 
@@ -321,152 +505,51 @@ function PresetEditor({ id }: { id?: string }) {
                     </label>
                   </div>
                   {groups.map((g, k) => (
-                    <GroupCard
+                    <GroupSection
                       key={k}
                       group={g}
                       color={groupColor(k)}
                       wledSet={wledSets[k]!}
                       sharedSet={wledSets.filter((x) => x === wledSets[k]).length > 1}
-                      open={openGroup === k}
-                      memberLabels={g.members.map(segmentLabel)}
-                      onToggle={() => setOpenGroup(openGroup === k ? null : k)}
-                      onRename={(name) => setGroups(groups.map((x, j) => (j === k ? { ...x, name } : x)))}
-                      onDelete={() => {
-                        setGroups(groups.filter((_, j) => j !== k));
-                        setOpenGroup(null);
+                      collapsed={collapsed.has(k)}
+                      editing={openGroup === k}
+                      memberLabels={membersOf(k).map(segmentLabel)}
+                      dropTarget={dragFrom !== null && groupIndexOf(dragFrom) !== k}
+                      onDrop={() => dragFrom !== null && setSegmentGroup(dragFrom, k)}
+                      onDragEnd={endDrag}
+                      onCollapse={() => toggleCollapsed(k)}
+                      onEdit={() => {
+                        setOpenGroup(openGroup === k ? null : k);
+                        toggleCollapsed(k, true);
                       }}
+                      onRename={(name) => setGroups(groups.map((x, j) => (j === k ? { ...x, name } : x)))}
+                      onDelete={() => deleteGroup(k)}
+                      editor={
+                        membersOf(k)[0] !== undefined && (
+                          <SegmentEditor
+                            index={membersOf(k)[0]!}
+                            segment={segments[membersOf(k)[0]!]!}
+                            title={`Edit ${plural(membersOf(k).length, "segment")} together`}
+                            hideGeometry
+                            catalog={catalog}
+                            library={palettes}
+                            rgbw={rgbw}
+                            markers={[]}
+                            onChange={(next) =>
+                              setState({ seg: applyGroupEdit(segments, membersOf(k), segments[membersOf(k)[0]!]!, next) })
+                            }
+                          />
+                        )
+                      }
                     >
-                      {g.members[0] !== undefined && segments[g.members[0]] && (
-                        <SegmentEditor
-                          index={g.members[0]}
-                          segment={segments[g.members[0]]!}
-                          title={`Edit ${g.members.length} segment${g.members.length === 1 ? "" : "s"} together`}
-                          hideGeometry
-                          catalog={catalog}
-                          library={palettes}
-                          rgbw={rgbw}
-                          markers={[]}
-                          onChange={(next) => setState({ seg: applyGroupEdit(segments, g.members, segments[g.members[0]!]!, next) })}
-                        />
-                      )}
-                    </GroupCard>
+                      {membersOf(k).map(segmentCard)}
+                      {addPicker(k)}
+                    </GroupSection>
                   ))}
-                  {segments.map((s, i) => {
-                    if (isClearMarker(s)) return null;
-                    const k = groupIndexOf(i);
-                    const dropHere = dragFrom !== null && dragOver === i && dragFrom !== i;
-                    return (
-                      <div
-                        key={i}
-                        onDragOver={(e) => {
-                          if (dragFrom === null) return;
-                          e.preventDefault();
-                          setDragOver(i);
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          if (dragFrom !== null && dragFrom !== i) move(dragFrom, i);
-                          endDrag();
-                        }}
-                        data-segment
-                        className={`rounded-lg ${dragFrom === i ? "opacity-40" : ""} ${
-                          dropHere ? (dragFrom! < i ? "shadow-[0_3px_0_0_#0ea5e9]" : "shadow-[0_-3px_0_0_#0ea5e9]") : ""
-                        }`}
-                      >
-                        <SegmentEditor
-                          index={i}
-                          segment={s}
-                          catalog={catalog}
-                          library={palettes}
-                          rgbw={rgbw}
-                          markers={sourceController?.markers ?? []}
-                          accent={k >= 0 ? groupColor(k) : undefined}
-                          title={
-                            <>
-                              {segmentLabel(i)}
-                              {s.sid && <span className="text-xs font-normal text-neutral-500">segment {s.id ?? i}</span>}
-                            </>
-                          }
-                          hideGeometry={!!s.sid}
-                          source={
-                            <SourcePicker
-                              segment={s}
-                              resolution={resolutions[i]}
-                              controller={sourceController}
-                              usedSids={usedSids}
-                              onLink={(sid) => {
-                                const next = fromDefinition(sid, s);
-                                if (next) setSegment(i, next);
-                              }}
-                              onUnlink={() => {
-                                const { sid: _, ...rest } = s;
-                                setSegment(i, rest);
-                              }}
-                            />
-                          }
-                          onChange={(next) => setSegment(i, next)}
-                          onRemove={() => removeSegment(i)}
-                          leading={
-                            <span className="flex items-center">
-                              <span
-                                role="button"
-                                aria-label="Drag to reorder"
-                                title="Drag to reorder"
-                                draggable
-                                onDragStart={(e) => {
-                                  setDragFrom(i);
-                                  e.dataTransfer.effectAllowed = "move";
-                                  e.dataTransfer.setData("text/plain", String(i));
-                                  // Show the whole segment card under the pointer, not just the handle.
-                                  const card = e.currentTarget.closest("[data-segment]");
-                                  if (card) e.dataTransfer.setDragImage(card, 24, 16);
-                                }}
-                                onDragEnd={endDrag}
-                                className="cursor-grab px-1 text-neutral-500 select-none hover:text-neutral-200 active:cursor-grabbing"
-                              >
-                                ⠿
-                              </span>
-                              <button
-                                type="button"
-                                aria-label="Move up"
-                                disabled={neighbor(i, -1) === undefined}
-                                onClick={() => move(i, neighbor(i, -1)!)}
-                                className="px-0.5 text-xs text-neutral-500 hover:text-neutral-200 disabled:opacity-30"
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                aria-label="Move down"
-                                disabled={neighbor(i, 1) === undefined}
-                                onClick={() => move(i, neighbor(i, 1)!)}
-                                className="px-0.5 text-xs text-neutral-500 hover:text-neutral-200 disabled:opacity-30"
-                              >
-                                ↓
-                              </button>
-                            </span>
-                          }
-                          headerExtra={
-                            <select
-                              value={k >= 0 ? String(k) : ""}
-                              aria-label="Group"
-                              onChange={(e) =>
-                                setSegmentGroup(i, e.target.value === "" ? null : e.target.value === "new" ? "new" : Number(e.target.value))
-                              }
-                              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-xs"
-                              style={k >= 0 ? { color: groupColor(k) } : undefined}
-                            >
-                              <option value="">No group</option>
-                              {groups.map((g, j) => (
-                                <option key={j} value={j}>{g.name}</option>
-                              ))}
-                              <option value="new">New group…</option>
-                            </select>
-                          }
-                        />
-                      </div>
-                    );
-                  })}
+                  {groups.length > 0 && ungrouped.length > 0 && (
+                    <h3 className="-mb-2 text-xs font-medium tracking-wide text-neutral-500 uppercase">Not in a group</h3>
+                  )}
+                  {ungrouped.map(segmentCard)}
                   {realCount === 0 && (
                     <p className="text-sm text-neutral-500">
                       No segments yet. Add the controller's defined segments this preset should light, or a custom one.
@@ -479,27 +562,7 @@ function PresetEditor({ id }: { id?: string }) {
                     </p>
                   )}
                   <div className="flex flex-wrap items-center gap-3">
-                    <select
-                      value=""
-                      onChange={(e) => onAdd(e.target.value)}
-                      disabled={realCount >= maxSegments}
-                      aria-label="Add segment"
-                      className="rounded-md border border-neutral-700 bg-neutral-800 px-2.5 py-1.5 text-sm hover:bg-neutral-700"
-                    >
-                      <option value="" disabled>+ Add segment…</option>
-                      {definitions.length > 0 && (
-                        <optgroup label={`Defined on ${sourceController!.name}`}>
-                          {definitions.map((d, j) => (
-                            <option key={d.id} value={d.id} disabled={usedSids.has(d.id) || !resolveRef(d.id).ok}>
-                              {definitionLabel(d, j)}
-                              {usedSids.has(d.id) ? " (added)" : !resolveRef(d.id).ok ? " (doesn't fit)" : ""}
-                            </option>
-                          ))}
-                          {definitions.filter((d) => !usedSids.has(d.id)).length > 1 && <option value="all">All not yet added</option>}
-                        </optgroup>
-                      )}
-                      <option value="custom">Custom LEDs</option>
-                    </select>
+                    {addPicker()}
                     {sourceController && (
                       <Link
                         to="/controllers/$id/segments"
@@ -605,17 +668,26 @@ function SourcePicker({
   );
 }
 
-/** A segment group: name, members, and an editor whose changes apply to every member. */
-function GroupCard({
+/**
+ * A segment group: a collapsible section holding its segments, with an editor whose changes apply to all of
+ * them. Segments dragged onto the header join the group.
+ */
+function GroupSection({
   group,
   color,
   wledSet,
   sharedSet,
-  open,
+  collapsed,
+  editing,
   memberLabels,
-  onToggle,
+  dropTarget,
+  onDrop,
+  onDragEnd,
+  onCollapse,
+  onEdit,
   onRename,
   onDelete,
+  editor,
   children,
 }: {
   group: SegmentGroup;
@@ -624,16 +696,48 @@ function GroupCard({
   wledSet: number;
   /** Other groups are in the same set: WLED only has four. */
   sharedSet: boolean;
-  open: boolean;
+  collapsed: boolean;
+  /** The edit-together editor is showing. */
+  editing: boolean;
   memberLabels: string[];
-  onToggle: () => void;
+  /** A segment from elsewhere is being dragged, so the header accepts it. */
+  dropTarget: boolean;
+  onDrop: () => void;
+  onDragEnd: () => void;
+  onCollapse: () => void;
+  onEdit: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
+  editor: ReactNode;
   children: ReactNode;
 }) {
+  const [over, setOver] = useState(false);
   return (
-    <div className="rounded-lg border border-l-4 border-neutral-800 p-3" style={{ borderLeftColor: color }}>
-      <div className="flex flex-wrap items-center gap-2 text-sm">
+    <section className="rounded-lg border border-l-4 border-neutral-800" style={{ borderLeftColor: color }}>
+      <div
+        className={`flex flex-wrap items-center gap-2 rounded-t-lg p-3 text-sm ${over && dropTarget ? "bg-neutral-800" : ""}`}
+        onDragOver={(e) => {
+          if (!dropTarget) return;
+          e.preventDefault();
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          if (dropTarget) onDrop();
+          onDragEnd();
+        }}
+      >
+        <button
+          type="button"
+          onClick={onCollapse}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? `Expand ${group.name}` : `Collapse ${group.name}`}
+          className="w-4 text-neutral-400 hover:text-neutral-100"
+        >
+          <span className={`inline-block transition-transform ${collapsed ? "" : "rotate-90"}`}>▸</span>
+        </button>
         <input
           value={group.name}
           onChange={(e) => onRename(e.target.value)}
@@ -643,8 +747,12 @@ function GroupCard({
           className="w-40 rounded-md border border-transparent bg-transparent px-1 py-0.5 font-medium hover:border-neutral-700 focus:border-neutral-600"
           style={{ color }}
         />
-        <span className="text-xs text-neutral-500">
-          {memberLabels.length ? memberLabels.join(", ") : "No segments yet: pick this group on a segment below"}
+        <span className="min-w-0 flex-1 truncate text-xs text-neutral-500" title={memberLabels.join(", ")}>
+          {!memberLabels.length
+            ? "No segments yet: add one below or drag one here"
+            : collapsed
+              ? memberLabels.join(", ")
+              : plural(memberLabels.length, "segment")}
         </span>
         <span
           className={`rounded bg-neutral-800 px-1.5 py-0.5 text-xs ${sharedSet ? "text-amber-300" : "text-neutral-400"}`}
@@ -657,10 +765,10 @@ function GroupCard({
           WLED set {wledSet + 1}
           {sharedSet && " (shared)"}
         </span>
-        <div className="ml-auto flex items-center gap-3 text-xs">
+        <div className="flex items-center gap-3 text-xs">
           {memberLabels.length > 0 && (
-            <button type="button" onClick={onToggle} className="text-sky-400 hover:text-sky-300">
-              {open ? "Done" : "Edit together"}
+            <button type="button" onClick={onEdit} className="text-sky-400 hover:text-sky-300">
+              {editing && !collapsed ? "Done" : "Edit together"}
             </button>
           )}
           <button type="button" onClick={onDelete} className="text-neutral-500 hover:text-red-400" title="Ungroup (keeps the segments)">
@@ -668,16 +776,21 @@ function GroupCard({
           </button>
         </div>
       </div>
-      {open && memberLabels.length > 0 && (
-        <div className="mt-3">
-          <p className="mb-2 text-xs text-neutral-500">
-            Showing {memberLabels[0]}'s settings. Anything you change here is copied to all {memberLabels.length} segments;
-            settings you don't touch stay as they are on each segment.
-          </p>
+      {!collapsed && (
+        <div className="flex flex-col gap-3 px-3 pb-3">
+          {editing && memberLabels.length > 0 && (
+            <div className="rounded-lg bg-neutral-900/60 p-2">
+              <p className="mb-2 text-xs text-neutral-500">
+                Showing {memberLabels[0]}'s settings. Anything you change here is copied to all {memberLabels.length} segments;
+                settings you don't touch stay as they are on each segment. Segments added to the group take these settings.
+              </p>
+              {editor}
+            </div>
+          )}
           {children}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

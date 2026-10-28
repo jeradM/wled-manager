@@ -3,6 +3,7 @@ import type { Segment, SegmentDefinition } from "./schemas.js";
 import {
   applyGroupEdit,
   indicesToSpans,
+  joinGroup,
   linkSegment,
   litLeds,
   presetSkipReason,
@@ -15,6 +16,7 @@ import {
   resolveSegmentRef,
   setClearOthers,
   virtualLength,
+  withSettingsOf,
   type SegmentSource,
 } from "./segments.js";
 
@@ -272,5 +274,41 @@ describe("moving segments and groups", () => {
     ]);
     const { bm: _, ...withoutBm } = before;
     expect(applyGroupEdit(seg, [0, 1], before, { ...withoutBm, col: [[5, 5, 5]] })[1]).toEqual({ fx: 2, col: [[5, 5, 5]], start: 10 });
+  });
+});
+
+describe("joining a group", () => {
+  const seg: Segment[] = [
+    { id: 0, start: 0, stop: 10, fx: 9, col: [[1, 2, 3]], pal: 4, bm: 2, grp: 2 },
+    { id: 1, sid: "a", start: 10, stop: 20, rev: true, n: "Roof", fx: 0, sx: 50, frz: true },
+    { id: 2, start: 20, stop: 30, fx: 3 },
+  ];
+
+  it("copies settings but keeps the segment's ID, LEDs and name", () => {
+    expect(withSettingsOf(seg[1]!, seg[0]!)).toEqual({
+      id: 1, sid: "a", start: 10, stop: 20, rev: true, n: "Roof", fx: 9, col: [[1, 2, 3]], pal: 4, bm: 2, grp: 2,
+    });
+  });
+
+  it("takes on the group's settings when joining", () => {
+    const groups = [{ name: "G", members: [0, 2] }];
+    const out = joinGroup(seg, groups, 1, 0);
+    expect(out.groups).toEqual([{ name: "G", members: [0, 1, 2] }]);
+    expect(out.seg[1]).toEqual({ ...withSettingsOf(seg[1]!, seg[0]!) });
+    expect(out.seg[0]).toBe(seg[0]);
+  });
+
+  it("leaves settings alone when the group is empty, already holds it, or when leaving", () => {
+    expect(joinGroup(seg, [{ name: "G", members: [] }], 1, 0)).toEqual({ seg, groups: [{ name: "G", members: [1] }] });
+    const groups = [{ name: "G", members: [0, 1] }];
+    expect(joinGroup(seg, groups, 1, 0)).toEqual({ seg, groups });
+    expect(joinGroup(seg, groups, 1, null)).toEqual({ seg, groups: [{ name: "G", members: [0] }] });
+  });
+
+  it("uses the new group's members, not its own, when switching groups", () => {
+    const groups = [{ name: "A", members: [0, 1] }, { name: "B", members: [2] }];
+    const out = joinGroup(seg, groups, 0, 1);
+    expect(out.groups).toEqual([{ name: "A", members: [1] }, { name: "B", members: [0, 2] }]);
+    expect(out.seg[0]).toEqual({ id: 0, start: 0, stop: 10, fx: 3 });
   });
 });

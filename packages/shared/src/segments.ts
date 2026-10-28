@@ -288,3 +288,34 @@ export function applyGroupEdit(seg: Segment[], members: number[], before: Segmen
     return next;
   });
 }
+
+/** What makes a segment itself rather than how it looks: its ID, LEDs, direction and name. */
+const PLACEMENT_KEYS = new Set(["id", "start", "stop", "rev", "sid", "n"]);
+
+/** `seg` with `template`'s settings (effect, colors, palette, grouping, …) but its own ID, LEDs and name. */
+export function withSettingsOf(seg: Segment, template: Segment): Segment {
+  const out: Segment = {};
+  for (const [k, v] of Object.entries(template)) if (!PLACEMENT_KEYS.has(k)) out[k] = structuredClone(v);
+  for (const [k, v] of Object.entries(seg)) if (PLACEMENT_KEYS.has(k)) out[k] = v;
+  return out;
+}
+
+/**
+ * Moves the segment at `position` into group `k` (out of any other), or into no group (null). A segment
+ * joining a group takes on the settings of the group's first other member, so it looks like the rest.
+ */
+export function joinGroup(
+  seg: Segment[],
+  groups: SegmentGroup[],
+  position: number,
+  k: number | null,
+): { seg: Segment[]; groups: SegmentGroup[] } {
+  const without = groups.map((g) => ({ ...g, members: g.members.filter((m) => m !== position) }));
+  if (k === null || !groups[k]) return { seg, groups: without };
+  if (groups[k].members.includes(position)) return { seg, groups };
+  const template = without[k]!.members[0];
+  return {
+    seg: template === undefined ? seg : seg.map((s, p) => (p === position ? withSettingsOf(s, seg[template]!) : s)),
+    groups: without.map((g, j) => (j === k ? { ...g, members: [...g.members, position].sort((a, b) => a - b) } : g)),
+  };
+}
