@@ -441,12 +441,23 @@ export function Simulator() {
         })}
         <Button
           onClick={() => {
+            // Presets saved on a controller pad seg with clear markers up to its segment limit; as in the
+            // preset editor, a new segment takes the first marker's place (and ID), or goes on the end.
+            const p = segments.findIndex(isClearMarker);
+            if (p >= 0) {
+              const seg = [...segments];
+              seg[p] = { ...newSegment(rgbw), id: segments[p]!.id ?? p };
+              setState({ ...state, seg });
+              setHidden(new Set([...hidden].filter((j) => j !== p)));
+              setCollapsed(new Set([...collapsed].filter((j) => j !== p)));
+              return;
+            }
             const ids = new Set(segments.map((s, i) => s.id ?? i));
             let id = 0;
             while (ids.has(id)) id++;
             setState({ ...state, seg: [...segments, { ...newSegment(rgbw), id }] });
           }}
-          disabled={segments.length >= 32}
+          disabled={segments.filter((s) => !isClearMarker(s)).length >= 32}
         >
           Add segment
         </Button>
