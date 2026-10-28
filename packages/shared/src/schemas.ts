@@ -8,13 +8,27 @@ const byte = z.number().int().min(0).max(255);
 export const paletteStop = z.object({ pos: byte, color: hexColor });
 export type PaletteStop = z.infer<typeof paletteStop>;
 
+const paletteStops = z.array(paletteStop).min(2).max(16);
+
+/** Different stops for one controller; it syncs these instead of the palette's own. */
+export const paletteVariant = z.object({ controllerId: z.string().min(1), stops: paletteStops });
+export type PaletteVariant = z.infer<typeof paletteVariant>;
+
 export const paletteInput = z.object({
   name: z.string().min(1).max(64),
-  stops: z.array(paletteStop).min(2).max(16),
+  stops: paletteStops,
+  variants: z
+    .array(paletteVariant)
+    .max(100)
+    .refine((v) => new Set(v.map((x) => x.controllerId)).size === v.length, {
+      message: "only one version per controller",
+    })
+    .optional(),
 });
 export type PaletteInput = z.infer<typeof paletteInput>;
 
 export const palette = paletteInput.extend({
+  variants: z.array(paletteVariant),
   id: z.string(),
   revision: z.number().int(),
   updatedAt: z.string(),

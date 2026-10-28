@@ -1,0 +1,1 @@
+ALTER TABLE `palettes` ADD `variants` text DEFAULT '[]' NOT NULL;

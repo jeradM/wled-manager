@@ -1,4 +1,5 @@
-import type { PaletteStop } from "./schemas.js";
+import type { PaletteStop, PaletteVariant } from "./schemas.js";
+import type { ResolvedSegment } from "./segments.js";
 
 /**
  * Custom palette file /paletteN.json appears on the device as palette ID base - N. Older firmware
@@ -69,4 +70,26 @@ export type PalxEntry = [number, number, number, number][] | string[];
 export function palxToStops(entry: PalxEntry): PaletteStop[] | null {
   if (entry.length === 0 || typeof entry[0] === "string") return null;
   return (entry as [number, number, number, number][]).map(([pos, r, g, b]) => ({ pos, color: toHex(r, g, b) }));
+}
+
+/** The stops a controller gets: its own version of the palette if it has one. */
+export const paletteStopsFor = (p: { stops: PaletteStop[]; variants?: PaletteVariant[] }, controllerId: string) =>
+  p.variants?.find((v) => v.controllerId === controllerId)?.stops ?? p.stops;
+
+/**
+ * Palette position (0-255) of an LED when a palette is spread along a run of LEDs, as WLED effects such as
+ * "Palette" do: LED i of n gets i * 255 / n, counted from the run's start (its end when reversed).
+ */
+export function palettePosition(led: number, run: Pick<ResolvedSegment, "start" | "stop" | "rev">): number | undefined {
+  if (led < run.start || led >= run.stop) return undefined;
+  const length = run.stop - run.start;
+  const i = run.rev ? run.stop - 1 - led : led - run.start;
+  return Math.floor((i * 255) / length);
+}
+
+/** The LED of a run that shows a palette position: the inverse of palettePosition. */
+export function ledAtPosition(pos: number, run: Pick<ResolvedSegment, "start" | "stop" | "rev">): number {
+  const length = run.stop - run.start;
+  const i = Math.min(length - 1, Math.max(0, Math.ceil((pos * length) / 255)));
+  return run.rev ? run.stop - 1 - i : run.start + i;
 }

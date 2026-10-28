@@ -56,11 +56,27 @@ interface Props {
   color: string;
   /** Per-LED fill, e.g. the segment an LED belongs to; unset LEDs are drawn dark. */
   colors?: (string | undefined)[];
+  /** Per-LED ring drawn in place of the marker ring, e.g. palette stops. */
+  outlines?: (string | undefined)[];
+  /** Per-LED text added to the tooltip. */
+  notes?: (string | undefined)[];
   onSelect?: (index: number, mods: SelectMods) => void;
 }
 
 /** Clickable map of a controller's LEDs, with markers and the lit LED highlighted. */
-export const LedMap = memo(function LedMap({ count, layout, markers, ranges, current, selected, color, colors, onSelect }: Props) {
+export const LedMap = memo(function LedMap({
+  count,
+  layout,
+  markers,
+  ranges,
+  current,
+  selected,
+  color,
+  colors,
+  outlines,
+  notes,
+  onSelect,
+}: Props) {
   const { points, width, height } = useMemo(() => ledPositions(count, layout), [count, layout]);
   const markerAt = useMemo(() => new Map(markers.map((m) => [m.index, m.label])), [markers]);
   const rangesAt = useMemo(() => {
@@ -83,7 +99,8 @@ export const LedMap = memo(function LedMap({ count, layout, markers, ranges, cur
         const marked = markerAt.has(i);
         const lit = selected ? selected.has(i) : i === current;
         const focused = i === current;
-        const names = [markerAt.get(i), ...(rangesAt.get(i) ?? [])].filter(Boolean);
+        const names = [markerAt.get(i), ...(rangesAt.get(i) ?? []), notes?.[i]].filter(Boolean);
+        const outline = outlines?.[i];
         return (
           <g
             key={i}
@@ -104,10 +121,10 @@ export const LedMap = memo(function LedMap({ count, layout, markers, ranges, cur
             <circle
               cx={p.x}
               cy={p.y}
-              r={lit ? CELL * 0.45 : colors?.[i] ? CELL * 0.34 : CELL * 0.28}
+              r={lit ? CELL * 0.45 : outline ? CELL * 0.4 : colors?.[i] ? CELL * 0.34 : CELL * 0.28}
               fill={lit ? color : (colors?.[i] ?? "#3f3f46")}
-              stroke={focused && lit ? "#ffffff" : marked ? "#f59e0b" : "none"}
-              strokeWidth={(focused && lit) || marked ? 2 : 0}
+              stroke={focused && lit ? "#ffffff" : (outline ?? (marked ? "#f59e0b" : "none"))}
+              strokeWidth={(focused && lit) || outline || marked ? 2 : 0}
               className={lit || !onSelect ? "" : "hover:fill-neutral-400"}
             />
             {i % labelEvery === 0 && (

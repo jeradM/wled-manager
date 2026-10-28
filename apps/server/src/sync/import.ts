@@ -4,6 +4,7 @@ import {
   customPaletteId,
   importPreset,
   paletteKey,
+  paletteStopsFor,
   type ImportPalette,
   type ImportPreset,
   type ImportPreview,
@@ -44,7 +45,7 @@ export class ImportService {
     const palettes: ImportPalette[] = [...device.palettes]
       .filter(([, p]) => p.stops)
       .map(([slot, p]) => {
-        const match = library.find((l) => paletteKey(l.stops) === p.key);
+        const match = library.find((l) => paletteKey(paletteStopsFor(l, controllerId)) === p.key);
         return {
           slot,
           deviceId: customPaletteId(slot, device.base),
@@ -84,7 +85,7 @@ export class ImportService {
       const wanted = new Set(request.palettes);
       for (const [slot, p] of device.palettes) {
         if (!p.stops) continue;
-        let id = library.find((l) => paletteKey(l.stops) === p.key)?.id;
+        let id = library.find((l) => paletteKey(paletteStopsFor(l, controllerId)) === p.key)?.id;
         if (id) {
           result.palettesLinked++;
         } else if (wanted.has(slot)) {

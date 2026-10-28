@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { HexColorInput, HexColorPicker } from "react-colorful";
-import type { PaletteStop } from "@wled-manager/shared";
+import type { PaletteStop, PaletteVariant } from "@wled-manager/shared";
 import { useBuiltinPalettes, useControllers, useDeletePalette, usePalette, usePalettePreview, useSavePalette } from "../queries";
 import { GradientEditor, GradientSwatch } from "../components/GradientEditor";
+import { LedPaletteEditor } from "../components/LedPaletteEditor";
 import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
 
 // WLED reads up to 18 entries per palette file; stay under that.
@@ -14,6 +15,9 @@ const DEFAULT_STOPS: PaletteStop[] = [
   { pos: 128, color: "#ffb000" },
   { pos: 255, color: "#2040ff" },
 ];
+
+type EditorView = "gradient" | "leds";
+const VIEW_KEY = "paletteEditorView";
 
 export function NewPalette() {
   return <PaletteEditor />;
@@ -26,18 +30,29 @@ export function EditPalette() {
 
 function PaletteEditor({ id }: { id?: string }) {
   const { data: existing, error: loadError } = usePalette(id);
+  const { data: controllers = [] } = useControllers();
   const save = useSavePalette(id);
   const del = useDeletePalette();
   const navigate = useNavigate();
 
   const [name, setName] = useState("");
   const [stops, setStops] = useState<PaletteStop[]>(DEFAULT_STOPS);
+  const [variants, setVariants] = useState<PaletteVariant[]>([]);
+  // The version being edited: the palette's own stops, or a controller's.
+  const [editing, setEditing] = useState<string | null>(null);
   const [selected, setSelected] = useState(0);
+  const [view, setView] = useState<EditorView>(() => (localStorage.getItem(VIEW_KEY) === "leds" ? "leds" : "gradient"));
+  const chooseView = (v: EditorView) => {
+    setView(v);
+    localStorage.setItem(VIEW_KEY, v);
+  };
 
   useEffect(() => {
     if (existing) {
       setName(existing.name);
       setStops(existing.stops);
+      setVariants(existing.variants);
+      setEditing(null);
       setSelected(0);
     }
   }, [existing]);
@@ -45,17 +60,35 @@ function PaletteEditor({ id }: { id?: string }) {
   if (loadError) return <ErrorText error={loadError} />;
   if (id && !existing) return null;
 
-  const stop = stops[selected] ?? stops[0]!;
-  const updateStop = (patch: Partial<PaletteStop>) =>
-    setStops(stops.map((s, i) => (i === selected ? { ...s, ...patch } : s)));
+  const variant = variants.find((v) => v.controllerId === editing);
+  const shown = variant?.stops ?? stops;
+  const setShown = (next: PaletteStop[]) =>
+    variant ? setVariants(variants.map((v) => (v === variant ? { ...v, stops: next } : v))) : setStops(next);
+  const controllerName = (cid: string) => controllers.find((c) => c.id === cid)?.name ?? "Removed controller";
+
+  const stop = shown[selected] ?? shown[0]!;
+  const updateStop = (patch: Partial<PaletteStop>) => setShown(shown.map((s, i) => (i === selected ? { ...s, ...patch } : s)));
   const removeStop = () => {
-    setStops(stops.filter((_, i) => i !== selected));
+    setShown(shown.filter((_, i) => i !== selected));
     setSelected(0);
   };
+  const edit = (cid: string | null) => {
+    setEditing(cid);
+    setSelected(0);
+  };
+  const addVariant = (cid: string) => {
+    setVariants([...variants, { controllerId: cid, stops: shown }]);
+    edit(cid);
+  };
+  const removeVariant = () => {
+    setVariants(variants.filter((v) => v !== variant));
+    edit(null);
+  };
 
+  const sorted = (s: PaletteStop[]) => [...s].sort((a, b) => a.pos - b.pos);
   const submit = () =>
     save.mutate(
-      { name: name.trim(), stops: [...stops].sort((a, b) => a.pos - b.pos) },
+      { name: name.trim(), stops: sorted(stops), variants: variants.map((v) => ({ ...v, stops: sorted(v.stops) })) },
       { onSuccess: () => navigate({ to: "/palettes" }) },
     );
 
@@ -63,6 +96,10 @@ function PaletteEditor({ id }: { id?: string }) {
     if (existing && confirm(`Delete palette "${existing.name}"? Controllers lose it on their next sync.`))
       del.mutate(existing.id, { onSuccess: () => navigate({ to: "/palettes" }) });
   };
+
+  const withoutVariant = controllers.filter((c) => !variants.some((v) => v.controllerId === c.id));
+  const tab = (active: boolean) =>
+    `rounded-t-md border-b-2 px-3 py-1.5 text-sm ${active ? "border-sky-500 text-neutral-100" : "border-transparent text-neutral-400 hover:text-neutral-200"}`;
 
   return (
     <div>
@@ -81,13 +118,76 @@ function PaletteEditor({ id }: { id?: string }) {
       <ErrorText error={save.error} />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_20rem]">
         <Card>
-          <div className="mb-4 max-w-sm">
-            <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Sunset glow" autoFocus={!id} />
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div className="w-full max-w-sm">
+              <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Sunset glow" autoFocus={!id} />
+            </div>
+            <div className="flex rounded-md border border-neutral-700 p-0.5 text-sm" role="group" aria-label="Edit on">
+              {(["gradient", "leds"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => chooseView(v)}
+                  className={`rounded px-3 py-1 ${view === v ? "bg-neutral-700 text-neutral-100" : "text-neutral-400 hover:text-neutral-200"}`}
+                >
+                  {v === "gradient" ? "Gradient" : "On the LEDs"}
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="mb-2 text-xs text-neutral-500">
-            Click the bar to add a stop ({stops.length}/{MAX_STOPS}). Drag handles or use arrow keys to move them.
-          </p>
-          <GradientEditor stops={stops} onChange={setStops} selected={selected} onSelect={setSelected} maxStops={MAX_STOPS} />
+          {controllers.length > 1 || variants.length > 0 ? (
+            <div className="mb-3 flex flex-wrap items-end gap-1 border-b border-neutral-800">
+              <button type="button" className={tab(!variant)} onClick={() => edit(null)}>
+                {variants.length ? "Other controllers" : "All controllers"}
+              </button>
+              {variants.map((v) => (
+                <button key={v.controllerId} type="button" className={tab(v === variant)} onClick={() => edit(v.controllerId)}>
+                  {controllerName(v.controllerId)}
+                </button>
+              ))}
+              {withoutVariant.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => e.target.value && addVariant(e.target.value)}
+                  className="mb-1 ml-auto rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-300"
+                >
+                  <option value="">+ Version for a controller…</option>
+                  {withoutVariant.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          ) : null}
+          {(variant || variants.length > 0) && (
+            <p className="mb-2 text-xs text-neutral-500">
+              {variant
+                ? `${controllerName(variant.controllerId)} gets these stops instead of the palette's own.`
+                : "Controllers without their own version get these stops."}
+            </p>
+          )}
+          {view === "leds" ? (
+            <div className="mb-4">
+              <LedPaletteEditor
+                key={editing ?? ""}
+                controllers={controllers}
+                lockedTo={variant?.controllerId}
+                stops={shown}
+                onChange={setShown}
+                selected={selected}
+                onSelect={setSelected}
+                maxStops={MAX_STOPS}
+              />
+            </div>
+          ) : (
+            <>
+              <p className="mb-2 text-xs text-neutral-500">
+                Click the bar to add a stop ({shown.length}/{MAX_STOPS}). Drag handles or use arrow keys to move them.
+              </p>
+              <GradientEditor stops={shown} onChange={setShown} selected={selected} onSelect={setSelected} maxStops={MAX_STOPS} />
+            </>
+          )}
           <div className="flex flex-wrap items-start gap-6">
             <HexColorPicker color={stop.color} onChange={(color) => updateStop({ color })} />
             <div className="flex flex-col gap-3 text-sm">
@@ -111,24 +211,43 @@ function PaletteEditor({ id }: { id?: string }) {
                   className="w-28 rounded-md border border-neutral-700 bg-neutral-900 px-2.5 py-1.5"
                 />
               </label>
-              <Button variant="danger" onClick={removeStop} disabled={stops.length <= 2}>
+              <Button variant="danger" onClick={removeStop} disabled={shown.length <= 2}>
                 Remove stop
               </Button>
+              {variant && (
+                <Button variant="danger" onClick={removeVariant}>
+                  Remove {controllerName(variant.controllerId)}'s version
+                </Button>
+              )}
             </div>
           </div>
         </Card>
-        <DeviceTools stops={stops} onLoad={(s) => { setStops(s); setSelected(0); }} />
+        <DeviceTools
+          key={editing ?? ""}
+          preferredId={variant?.controllerId}
+          stops={shown}
+          onLoad={(s) => { setShown(s); setSelected(0); }}
+        />
       </div>
     </div>
   );
 }
 
 /** Start from a controller's built-in palette, or preview the current stops on a controller. */
-function DeviceTools({ stops, onLoad }: { stops: PaletteStop[]; onLoad: (stops: PaletteStop[]) => void }) {
+function DeviceTools({
+  stops,
+  onLoad,
+  preferredId,
+}: {
+  stops: PaletteStop[];
+  onLoad: (stops: PaletteStop[]) => void;
+  /** Controller to start with, when editing its own version. */
+  preferredId?: string;
+}) {
   const { data: controllers = [] } = useControllers();
   const online = controllers.filter((c) => c.status === "online");
   const [controllerId, setControllerId] = useState<string>();
-  const activeId = controllerId ?? online[0]?.id;
+  const activeId = controllerId ?? online.find((c) => c.id === preferredId)?.id ?? online[0]?.id;
   const { data: builtins = [], isFetching } = useBuiltinPalettes(activeId);
   const preview = usePalettePreview();
   const copyable = builtins.filter((b) => b.stops);

@@ -12,6 +12,7 @@ const toPalette = (row: PaletteRow): Palette => ({
   id: row.id,
   name: row.name,
   stops: row.stops,
+  variants: row.variants,
   revision: row.revision,
   updatedAt: row.updatedAt,
 });
@@ -37,7 +38,7 @@ export class PaletteService {
     const last = this.db.select({ value: max(palettes.position) }).from(palettes).get()?.value ?? -1;
     const row = this.db
       .insert(palettes)
-      .values({ id: randomUUID(), ...input, position: last + 1 })
+      .values({ id: randomUUID(), ...input, variants: input.variants ?? [], position: last + 1 })
       .returning()
       .get();
     this.events.publish({ type: "palettes.changed" });
@@ -48,7 +49,7 @@ export class PaletteService {
     this.get(id);
     const row = this.db
       .update(palettes)
-      .set({ ...input, revision: sql`${palettes.revision} + 1`, updatedAt: new Date().toISOString() })
+      .set({ ...input, variants: input.variants ?? [], revision: sql`${palettes.revision} + 1`, updatedAt: new Date().toISOString() })
       .where(eq(palettes.id, id))
       .returning()
       .get();

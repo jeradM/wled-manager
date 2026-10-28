@@ -1,5 +1,5 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import type { LedLayout, LedMarker, LedRange, PaletteStop, PresetState, SegmentDefinition, SegmentGroup } from "@wled-manager/shared";
+import type { LedLayout, LedMarker, LedRange, PaletteStop, PaletteVariant, PresetState, SegmentDefinition, SegmentGroup } from "@wled-manager/shared";
 import type { WledInfo } from "../wled/client.js";
 
 const timestamps = {
@@ -36,6 +36,8 @@ export const palettes = sqliteTable("palettes", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   stops: text("stops", { mode: "json" }).$type<PaletteStop[]>().notNull(),
+  /** Controller-specific versions: different stops under the same name. */
+  variants: text("variants", { mode: "json" }).$type<PaletteVariant[]>().notNull().default([]),
   /** Sync priority: lower positions get slots first when a controller runs out of room. */
   position: integer("position").notNull().default(0),
   revision: integer("revision").notNull().default(1),

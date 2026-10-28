@@ -6,6 +6,7 @@ import {
   customPaletteId,
   paletteFileName,
   paletteKey,
+  paletteStopsFor,
   presetSkipReason,
   renderPreset,
   resolveSegmentRef,
@@ -141,7 +142,7 @@ export class SyncService {
     }
     const desiredPalettes: DesiredPalette[] = library
       .filter((p) => slots[p.id] !== undefined)
-      .map((p) => ({ slot: slots[p.id]!, paletteId: p.id, name: p.name, stops: p.stops }))
+      .map((p) => ({ slot: slots[p.id]!, paletteId: p.id, name: p.name, stops: paletteStopsFor(p, controllerId) }))
       .sort((a, b) => a.slot - b.slot);
 
     // A device file that differs from what the manager last wrote to that slot came from elsewhere.

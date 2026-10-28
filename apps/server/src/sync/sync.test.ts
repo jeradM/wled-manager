@@ -54,6 +54,33 @@ describe("palette sync", () => {
     expect((await plan(c.id)).inSync).toBe(true);
   });
 
+  it("syncs a controller's own version of a palette, and only that controller", async () => {
+    const c = await setup();
+    const other = await startMock();
+    try {
+      const o = (
+        await t.app.inject({ method: "POST", url: "/api/controllers", payload: { name: "Other", host: other.host, port: other.port } })
+      ).json<Controller>();
+      const p = await addPalette("Red", red);
+      const put = (variants: object[]) =>
+        t.app.inject({ method: "PUT", url: `/api/palettes/${p.id}`, payload: { name: "Red", stops: red, variants } });
+      expect((await put([{ controllerId: c.id, stops: blue }])).json<Palette>().variants).toEqual([{ controllerId: c.id, stops: blue }]);
+      expect((await put([{ controllerId: c.id, stops: blue }, { controllerId: c.id, stops: green }])).statusCode).toBe(400);
+
+      await sync(c.id);
+      await sync(o.id);
+      expect(JSON.parse(mock.files.get("/palette0.json")!)).toEqual({ palette: [0, 0, 0, 255, 255, 0, 0, 0] });
+      expect(JSON.parse(other.files.get("/palette0.json")!)).toEqual({ palette: [0, 255, 0, 0, 255, 0, 0, 0] });
+
+      // Editing the version only changes that controller.
+      await put([{ controllerId: c.id, stops: green }]);
+      expect(actions(await plan(c.id))).toEqual(["update:0:Red"]);
+      expect((await plan(o.id)).inSync).toBe(true);
+    } finally {
+      await other.stop();
+    }
+  });
+
   it("treats hex-form device files with the same colors as unchanged", async () => {
     const c = await setup();
     await addPalette("Red", red);

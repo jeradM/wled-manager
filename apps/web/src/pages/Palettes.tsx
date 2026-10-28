@@ -27,7 +27,10 @@ export function Palettes() {
                 <GradientSwatch stops={p.stops} className="h-10" />
                 <div className="mt-3 flex items-baseline justify-between">
                   <span className="font-medium">{p.name}</span>
-                  <span className="text-xs text-neutral-500">{p.stops.length} stops</span>
+                  <span className="text-xs text-neutral-500">
+                    {p.stops.length} stops
+                    {p.variants.length > 0 && ` · ${p.variants.length} controller version${p.variants.length === 1 ? "" : "s"}`}
+                  </span>
                 </div>
               </Card>
             </Link>
