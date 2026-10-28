@@ -213,7 +213,7 @@ export function SegmentEditor({
         ))}
       </div>
 
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_12rem]">
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_12rem_10rem]">
         <div>
           <span className="text-xs text-neutral-400">
             Palette{!controls.usesPalette && " (this effect doesn't use one)"}
@@ -245,6 +245,25 @@ export function SegmentEditor({
             ))}
             {s.bm !== undefined && s.bm >= BLEND_MODES.length && <option value={s.bm}>Mode {s.bm}</option>}
           </select>
+        </label>
+        <label
+          className="flex flex-col gap-1"
+          title="Segment opacity (WLED's segment brightness). Below 100% the segment is mixed with the segments under it."
+        >
+          <span className="flex justify-between text-xs text-neutral-400">
+            Opacity
+            <span title={s.bri === undefined ? "Not set: the controller keeps its current value" : undefined}>
+              {s.bri === undefined ? "–" : `${Math.round((s.bri / 255) * 100)}%`}
+            </span>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={255}
+            value={s.bri ?? 255}
+            onChange={(e) => set({ bri: Number(e.target.value) })}
+            className={`mt-1.5 accent-sky-500 ${s.bri === undefined ? "opacity-40" : ""}`}
+          />
         </label>
       </div>
 

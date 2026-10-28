@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { applyGroupEdit, type Palette, type PresetState, type Segment } from "@wled-manager/shared";
+import {
+  applyGroupEdit,
+  removeGroupMember,
+  renumberSegments,
+  type Palette,
+  type PresetInput,
+  type PresetState,
+  type Segment,
+  type SegmentGroup,
+} from "@wled-manager/shared";
 import { SIM_EFFECTS, Simulator as Sim, ledCss, simCatalog, stopsToPalette16, type LedTrace, type Palette16 } from "@wled-manager/shared/sim";
 import { BLEND_MODES } from "../components/preset/wled-options";
 import { usePalettes, usePresets, useWritePreset } from "../queries";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
 import { isClearMarker, newSegment } from "../components/preset/describe";
-import { Button, Card, ErrorText, PageHeader } from "../components/ui";
+import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
 
 const CATALOG = simCatalog();
 const COUNT_KEY = "simLedCount";
@@ -108,6 +117,55 @@ export function Simulator() {
     );
   };
 
+  // "Save as new preset": name and slot, while the form is open.
+  const [creating, setCreating] = useState<{ name: string; slot: number } | null>(null);
+  const freeSlot = () => {
+    const used = new Set(presets.map((p) => p.slot));
+    for (let slot = 1; slot <= 250; slot++) if (!used.has(slot)) return slot;
+    return 250;
+  };
+  const slotTaken = creating ? presets.find((p) => p.slot === creating.slot) : undefined;
+  /** The simulator's setup as a preset, leaving out segments hidden in the simulator. */
+  const newPresetState = (): { state: PresetState; groups: SegmentGroup[] } => {
+    let seg = [...state.seg];
+    let groups = loaded?.groups ?? [];
+    // As in the preset editor: with clear markers present, a removed segment becomes one, keeping positions (IDs).
+    const markers = seg.some(isClearMarker);
+    for (const i of [...hidden].sort((a, b) => b - a)) {
+      if (i >= seg.length) continue;
+      if (markers) seg[i] = { id: seg[i]!.id ?? i, stop: 0 };
+      else seg = seg.filter((_, j) => j !== i);
+      groups = removeGroupMember(groups, i, !markers);
+    }
+    const next = markers ? { ...state, seg } : renumberSegments({ ...state, seg });
+    return { state: next, groups: groups.filter((g) => g.members.length > 0) };
+  };
+  const kept = state.seg.filter((s, i) => !isClearMarker(s) && !hidden.has(i)).length;
+  const create = () => {
+    if (!creating) return;
+    const { state: presetState, groups: presetGroups } = newPresetState();
+    const input: PresetInput = {
+      slot: creating.slot,
+      name: creating.name.trim(),
+      kind: "state",
+      state: presetState,
+      ...(presetGroups.length ? { groups: presetGroups } : {}),
+      // A copy of a preset stays in its group and goes to the same controllers.
+      ...(loaded?.folder ? { folder: loaded.folder } : {}),
+      ...(loaded?.controllers ? { controllers: loaded.controllers } : {}),
+    };
+    write.mutate(
+      { input },
+      {
+        onSuccess: (p) => {
+          setCreating(null);
+          loadedId.current = null;
+          void navigate({ to: "/simulator", search: { preset: p.id } });
+        },
+      },
+    );
+  };
+
   const commitCount = (text: string) => {
     const n = Math.min(MAX_LEDS, Math.max(1, Math.round(Number(text)) || count));
     setCount(n);
@@ -162,10 +220,67 @@ export function Simulator() {
                 </Button>
               </>
             )}
+            <Button
+              variant={loaded ? "secondary" : "primary"}
+              onClick={() => setCreating({ name: loaded ? `${loaded.name} copy` : "", slot: freeSlot() })}
+              disabled={!!creating}
+            >
+              Save as new preset
+            </Button>
           </>
         }
       />
       <ErrorText error={write.error} />
+      {creating && (
+        <Card>
+          <form
+            className="flex flex-wrap items-end gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              create();
+            }}
+          >
+            <div className="min-w-64 flex-1">
+              <Input
+                label="Name"
+                value={creating.name}
+                maxLength={64}
+                autoFocus
+                onChange={(e) => setCreating({ ...creating, name: e.target.value })}
+              />
+            </div>
+            <div className="w-24">
+              <Input
+                label="Slot"
+                type="number"
+                min={1}
+                max={250}
+                value={creating.slot}
+                onChange={(e) => setCreating({ ...creating, slot: Math.min(250, Math.max(1, Math.round(Number(e.target.value)) || 1)) })}
+              />
+            </div>
+            <Button type="button" onClick={() => setCreating(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" disabled={!creating.name.trim() || !!slotTaken || kept === 0 || write.isPending}>
+              Create preset
+            </Button>
+            <p className="w-full text-xs text-neutral-400">
+              {slotTaken ? (
+                <span className="text-red-400">Slot {creating.slot} is used by "{slotTaken.name}".</span>
+              ) : kept === 0 ? (
+                <span className="text-red-400">Every segment is hidden; show at least one to make a preset.</span>
+              ) : (
+                <>
+                  Saves the current settings with {kept} segment{kept === 1 ? "" : "s"}
+                  {hidden.size > 0 && `, leaving out ${hidden.size} hidden in the simulator`}.
+                  {loaded && dirty && ` "${loaded.name}" keeps its saved settings.`}
+                </>
+              )}
+            </p>
+          </form>
+        </Card>
+      )}
 
       <Card className="sticky top-0 z-30 space-y-3 shadow-lg shadow-black/60">
         <div className="flex flex-wrap items-end gap-4 text-sm">
