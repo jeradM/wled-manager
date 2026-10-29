@@ -8,6 +8,7 @@ import { ControllerDetail } from "./pages/ControllerDetail";
 import { Locator } from "./pages/Locator";
 import { SegmentBuilder } from "./pages/SegmentBuilder";
 import { EditLayeredEffect, LayeredEffects, NewLayeredEffect } from "./pages/LayeredEffects";
+import { EditLayout, Layouts, NewLayout } from "./pages/Layouts";
 import { Palettes } from "./pages/Palettes";
 import { EditPalette, NewPalette } from "./pages/PaletteEditor";
 import { Presets } from "./pages/Presets";
@@ -36,6 +37,7 @@ const nav = [
   { to: "/palettes", label: "Palettes" },
   { to: "/presets", label: "Presets" },
   { to: "/effects", label: "Layered effects" },
+  { to: "/layouts", label: "Layouts" },
   { to: "/simulator", label: "Simulator" },
   { to: "/settings", label: "Settings" },
 ] as const;
@@ -83,6 +85,9 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/effects", component: LayeredEffects }),
   createRoute({ getParentRoute: () => rootRoute, path: "/effects/new", component: NewLayeredEffect }),
   createRoute({ getParentRoute: () => rootRoute, path: "/effects/$id", component: EditLayeredEffect }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/layouts", component: Layouts }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/layouts/new", component: NewLayout }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/layouts/$id", component: EditLayout }),
   createRoute({ getParentRoute: () => rootRoute, path: "/presets", component: Presets }),
   createRoute({
     getParentRoute: () => rootRoute,

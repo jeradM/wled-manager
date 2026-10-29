@@ -1,5 +1,5 @@
-import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import type { Layer, LedLayout, LedMarker, LedRange, PaletteStop, PaletteVariant, PresetState, SegmentDefinition, SegmentGroup } from "@wled-manager/shared";
+import { blob, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import type { Layer, LayoutLine, LedLayout, LedMarker, LedRange, PaletteStop, PaletteVariant, PresetState, SegmentDefinition, SegmentGroup } from "@wled-manager/shared";
 import type { WledInfo } from "../wled/client.js";
 
 const timestamps = {
@@ -71,6 +71,20 @@ export const layeredEffects = sqliteTable("layered_effects", {
   name: text("name").notNull(),
   /** Bottom to top. */
   layers: text("layers", { mode: "json" }).$type<Layer[]>().notNull(),
+  revision: integer("revision").notNull().default(1),
+  ...timestamps,
+});
+
+export const layouts = sqliteTable("layouts", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  lines: text("lines", { mode: "json" }).$type<LayoutLine[]>().notNull(),
+  ledSize: integer("led_size").notNull().default(8),
+  /** The picture the lights are drawn on; kept in the database so the data stays in one file. */
+  image: blob("image", { mode: "buffer" }),
+  imageType: text("image_type"),
+  imageWidth: integer("image_width"),
+  imageHeight: integer("image_height"),
   revision: integer("revision").notNull().default(1),
   ...timestamps,
 });

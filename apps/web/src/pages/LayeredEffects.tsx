@@ -1,10 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { canonicalJson, segmentLayers, withLayers, type Layer, type LayeredEffect, type Palette, type Preset, type PresetState } from "@wled-manager/shared";
-import { useDeleteLayeredEffect, useLayeredEffect, useLayeredEffects, usePalettes, usePresets, useWriteLayeredEffect } from "../queries";
+import {
+  canonicalJson,
+  segmentLayers,
+  withLayers,
+  type Layer,
+  type LayeredEffect,
+  type LayoutStrip,
+  type Palette,
+  type Preset,
+  type PresetState,
+} from "@wled-manager/shared";
+import { useControllers, useDeleteLayeredEffect, useLayeredEffect, useLayeredEffects, usePalettes, usePresets, useWriteLayeredEffect } from "../queries";
 import { LayerStack, newLayer } from "../components/preset/LayerStack";
 import { layerEffectName } from "../components/preset/LayerEditor";
 import { CATALOG, LedCanvas } from "../components/sim/LedCanvas";
+import { LayoutView } from "../components/sim/LayoutView";
+import { layoutSummary, useLayoutView } from "../components/sim/ViewPicker";
 import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
 
 const COUNT_KEY = "effectLedCount";
@@ -129,6 +141,11 @@ function LayeredEffectEditor({ id }: { id?: string }) {
 
   const rgbw = rgbwChoice ?? usesWhite(layers);
   const state = useMemo(() => previewState(layers, count), [layers, count]);
+  const { data: controllers = [] } = useControllers();
+  const [layout, viewPicker] = useLayoutView("effectView");
+  // On a layout, the effect fills every controller's lights.
+  const stateForStrip = useCallback((strip: LayoutStrip) => previewState(layers, Math.max(1, strip.ledCount)), [layers]);
+  const stripName = (id: string | null) => (id === null ? "Unassigned" : (controllers.find((c) => c.id === id)?.name ?? "Removed controller"));
 
   if (loadError) return <ErrorText error={loadError} />;
   if (id && !existing) return null;
@@ -186,7 +203,9 @@ function LayeredEffectEditor({ id }: { id?: string }) {
 
       <Card className="sticky top-0 z-30 space-y-3 shadow-lg shadow-black/60">
         <div className="flex flex-wrap items-end gap-4 text-sm">
-          <label className="flex flex-col gap-1">
+          {viewPicker}
+          {layout && <span className="max-w-64 self-center text-xs text-neutral-400">{layoutSummary(layout, controllers) || "No lights on this layout yet"}</span>}
+          <label className={`flex flex-col gap-1 ${layout ? "hidden" : ""}`}>
             <span className="text-xs text-neutral-400">Preview LEDs</span>
             <input
               type="number"
@@ -208,7 +227,11 @@ function LayeredEffectEditor({ id }: { id?: string }) {
           <Button onClick={() => setPaused(!paused)}>{paused ? "Play" : "Pause"}</Button>
           <span className="ml-auto text-xs text-neutral-500">{describeLayers(layers)}</span>
         </div>
-        <LedCanvas state={state} count={count} palettes={palettes} paused={paused} whiteLeds={rgbw} />
+        {layout ? (
+          <LayoutView layout={layout} stateFor={stateForStrip} stripName={stripName} palettes={palettes} paused={paused} whiteLeds={rgbw} />
+        ) : (
+          <LedCanvas state={state} count={count} palettes={palettes} paused={paused} whiteLeds={rgbw} />
+        )}
       </Card>
 
       <Card>

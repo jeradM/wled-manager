@@ -24,6 +24,30 @@ const NONE_HIDDEN: Hidden = new Set();
 /** How the LED details name a segment's layer, and whether the simulator hides it. */
 export type LayerInfo = (segment: number, layer: number) => { label?: string; hidden: boolean };
 
+/** Library palettes as the simulator uses them, by palette ID. */
+export function usePalette16s(palettes: Palette[]) {
+  return useMemo(() => {
+    const m = new Map<string, Palette16>();
+    for (const p of palettes) m.set(p.id, stopsToPalette16(p.stops));
+    return m;
+  }, [palettes]);
+}
+
+/**
+ * Runs a light state on a simulator: each layer as a WLED segment of its own on its segment's LEDs, effects
+ * matched by name. Returns the WLED segments it ran and where each came from.
+ */
+export function applyToSim(sim: Sim, state: PresetState, count: number, palettes: Map<string, Palette16>) {
+  const expanded = expandLayers(state.seg);
+  sim.setLength(count);
+  const seg = expanded.seg.map((s) => {
+    const fx = simEffect(s);
+    return fx === s.fx ? s : { ...s, fx };
+  });
+  sim.apply({ ...state, seg }, (id) => palettes.get(id) ?? null);
+  return expanded;
+}
+
 /** The simulated strip: LEDs as circles, wrapped into rows, animated at WLED's frame rate. While paused, clicking an LED explains its color. */
 export function LedCanvas({
   state,
@@ -52,11 +76,7 @@ export function LedCanvas({
   const pickedLed = useRef<number | null>(null);
   pickedLed.current = picked?.led ?? null;
 
-  const resolved = useMemo(() => {
-    const m = new Map<string, Palette16>();
-    for (const p of palettes) m.set(p.id, stopsToPalette16(p.stops));
-    return m;
-  }, [palettes]);
+  const resolved = usePalette16s(palettes);
 
   useEffect(() => {
     sim.setPaused(paused);
@@ -65,17 +85,11 @@ export function LedCanvas({
 
   // Bumped after each apply so the details recompute against the current settings.
   const [applied, setApplied] = useState(0);
-  // Each layer runs as a WLED segment of its own on its segment's LEDs.
-  const expanded = useMemo(() => expandLayers(state.seg), [state]);
+  const [expanded, setExpanded] = useState(() => expandLayers(state.seg));
   useEffect(() => {
-    sim.setLength(count);
-    const seg = expanded.seg.map((s) => {
-      const fx = simEffect(s);
-      return fx === s.fx ? s : { ...s, fx };
-    });
-    sim.apply({ ...state, seg }, (id) => resolved.get(id) ?? null);
+    setExpanded(applyToSim(sim, state, count, resolved));
     setApplied((n) => n + 1);
-  }, [sim, state, expanded, count, resolved]);
+  }, [sim, state, count, resolved]);
 
   useEffect(() => {
     if (picked && picked.led >= count) setPicked(null);
@@ -193,13 +207,14 @@ function Chip({ color, whiteLeds, label }: { color: number; whiteLeds: boolean; 
 }
 
 /** Every segment and layer on an LED, bottom to top, and how each one's color combined with what was below. */
-function LedDetails({
+export function LedDetails({
   trace,
   state,
   layers,
   palettes,
   whiteLeds,
   layerInfo,
+  title,
   onClose,
 }: {
   trace: LedTrace;
@@ -209,6 +224,8 @@ function LedDetails({
   palettes: Palette[];
   whiteLeds: boolean;
   layerInfo: LayerInfo;
+  /** Heading; defaults to "LED <number>". */
+  title?: string;
   onClose: () => void;
 }) {
   const paletteName = (s: Segment) => {
@@ -227,7 +244,7 @@ function LedDetails({
     <div className="w-96 space-y-2 rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-xs shadow-xl shadow-black/70">
       <div className="flex items-center justify-between">
         <span className="flex items-center gap-2 text-sm font-medium">
-          LED {trace.led}
+          {title ?? `LED ${trace.led}`}
           <Chip color={trace.color} whiteLeds={whiteLeds} />
         </span>
         <button type="button" onClick={onClose} aria-label="Close" className="text-neutral-400 hover:text-neutral-100">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   applyGroupEdit,
@@ -8,6 +8,8 @@ import {
   removeGroupMember,
   renumberSegments,
   resolveEffectLinks,
+  stateForController,
+  type LayoutStrip,
   segmentLayers,
   wledSegmentCount,
   withLayers,
@@ -18,7 +20,9 @@ import {
 } from "@wled-manager/shared";
 import { SIM_EFFECTS } from "@wled-manager/shared/sim";
 import { CATALOG, LedCanvas, isHidden, segmentName, simEffect, type Hidden } from "../components/sim/LedCanvas";
-import { useLayeredEffects, usePalettes, usePresets, useWritePreset } from "../queries";
+import { LayoutView } from "../components/sim/LayoutView";
+import { layoutSummary, useLayoutView } from "../components/sim/ViewPicker";
+import { useControllers, useLayeredEffects, usePalettes, usePresets, useWritePreset } from "../queries";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
 import { copyName, isClearMarker, newSegment } from "../components/preset/describe";
 import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
@@ -62,6 +66,8 @@ export function Simulator() {
   /** Layers of a layered effect, for segments linked to one. */
   const effectLayers = (id: string) => layeredEffects.find((e) => e.id === id)?.layers;
   const write = useWritePreset();
+  const { data: controllers = [] } = useControllers();
+  const [layout, viewPicker] = useLayoutView("simView");
 
   const [count, setCount] = useState(savedLedCount);
   const [countText, setCountText] = useState(String(count));
@@ -107,6 +113,15 @@ export function Simulator() {
     }),
     [state, resolved, hidden],
   );
+  // On a layout, each controller runs the preset as it would for real: defined segments take its own LEDs.
+  const stateForStrip = useCallback(
+    (strip: LayoutStrip) => {
+      const c = controllers.find((x) => x.id === strip.controllerId);
+      return c ? stateForController(simState, c, controllers) : simState;
+    },
+    [simState, controllers],
+  );
+  const stripName = (id: string | null) => (id === null ? "Unassigned" : (controllers.find((c) => c.id === id)?.name ?? "Removed controller"));
   /** How the LED details name segment i's resolved layer j, and whether it's hidden in the simulator. */
   const layerInfo = (i: number, j: number) => {
     const from = resolved.sources[i]?.[j];
@@ -369,19 +384,26 @@ export function Simulator() {
 
       <Card className="sticky top-0 z-30 space-y-3 shadow-lg shadow-black/60">
         <div className="flex flex-wrap items-end gap-4 text-sm">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-neutral-400">LEDs</span>
-            <input
-              type="number"
-              min={1}
-              max={MAX_LEDS}
-              value={countText}
-              onChange={(e) => setCountText(e.target.value)}
-              onBlur={(e) => commitCount(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && commitCount(e.currentTarget.value)}
-              className="w-24 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
-            />
-          </label>
+          {viewPicker}
+          {layout ? (
+            <span className="max-w-64 self-center text-xs text-neutral-400" title="Each controller on the layout runs the preset with its own segment LEDs">
+              {layoutSummary(layout, controllers) || "No lights on this layout yet"}
+            </span>
+          ) : (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-neutral-400">LEDs</span>
+              <input
+                type="number"
+                min={1}
+                max={MAX_LEDS}
+                value={countText}
+                onChange={(e) => setCountText(e.target.value)}
+                onBlur={(e) => commitCount(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && commitCount(e.currentTarget.value)}
+                className="w-24 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1"
+              />
+            </label>
+          )}
           <label className="flex min-w-48 flex-col gap-1">
             <span className="flex justify-between text-xs text-neutral-400">
               Brightness <span>{state.bri ?? 128}</span>
@@ -418,13 +440,25 @@ export function Simulator() {
             {loaded ? (dirty ? "Unsaved changes" : savedAt ? `Saved at ${savedAt}` : `Editing preset ${loaded.slot}`) : "Not linked to a preset"}
           </span>
         </div>
-        <LedCanvas state={simState} count={count} palettes={palettes} paused={paused} whiteLeds={rgbw} layerInfo={layerInfo} />
-        {(unsimulated.length > 0 || outside > 0) && (
+        {layout ? (
+          <LayoutView
+            layout={layout}
+            stateFor={stateForStrip}
+            stripName={stripName}
+            palettes={palettes}
+            paused={paused}
+            whiteLeds={rgbw}
+            layerInfo={layerInfo}
+          />
+        ) : (
+          <LedCanvas state={simState} count={count} palettes={palettes} paused={paused} whiteLeds={rgbw} layerInfo={layerInfo} />
+        )}
+        {(unsimulated.length > 0 || (outside > 0 && !layout)) && (
           <ul className="space-y-0.5 text-xs text-amber-400">
             {unsimulated.map((u) => (
               <li key={u}>{u} isn't simulated (2D, audio-reactive and particle effects aren't ported); it shows as Solid.</li>
             ))}
-            {outside > 0 && (
+            {outside > 0 && !layout && (
               <li>
                 {outside} segment{outside === 1 ? " starts" : "s start"} past LED {count}, so {outside === 1 ? "it isn't" : "they aren't"} shown. Raise the LED count to see {outside === 1 ? "it" : "them"}.
               </li>

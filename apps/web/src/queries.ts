@@ -14,6 +14,8 @@ import type {
   PaletteStop,
   LayeredEffect,
   LayeredEffectInput,
+  Layout,
+  LayoutInput,
   Preset,
   PresetInput,
   QuickControl,
@@ -37,6 +39,8 @@ export const keys = {
   presets: ["presets"] as const,
   preset: (id: string) => ["presets", id] as const,
   effects: ["effects"] as const,
+  layouts: ["layouts"] as const,
+  layout: (id: string) => ["layouts", id] as const,
   effect: (id: string) => ["effects", id] as const,
   catalog: (id: string) => ["controllers", id, "catalog"] as const,
   importPreview: (id: string) => ["controllers", id, "import"] as const,
@@ -294,6 +298,60 @@ export function useDeleteLayeredEffect() {
   });
 }
 
+export const useLayouts = () => useQuery({ queryKey: keys.layouts, queryFn: () => api<Layout[]>("/layouts") });
+
+export const useLayout = (id: string | undefined) =>
+  useQuery({ queryKey: keys.layout(id ?? ""), queryFn: () => api<Layout>(`/layouts/${id}`), enabled: !!id });
+
+/** URL of a layout's picture; changes whenever the layout does, so a new picture isn't served from cache. */
+export const layoutImageUrl = (l: Pick<Layout, "id" | "revision">) => `/api/layouts/${l.id}/image?v=${l.revision}`;
+
+/**
+ * Creates a layout (no id) or saves one, then stores a newly chosen picture, or removes it (image: null).
+ * Resolves to the layout as saved.
+ */
+export function useWriteLayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      input,
+      image,
+    }: {
+      id?: string;
+      input: LayoutInput;
+      image?: { file: Blob; width: number; height: number } | null;
+    }) => {
+      let saved = id
+        ? await api<Layout>(`/layouts/${id}`, { method: "PUT", body: JSON.stringify(input) })
+        : await api<Layout>("/layouts", { method: "POST", body: JSON.stringify(input) });
+      if (image)
+        saved = await api<Layout>(`/layouts/${saved.id}/image?width=${image.width}&height=${image.height}`, {
+          method: "PUT",
+          body: image.file,
+          headers: { "content-type": image.file.type },
+        });
+      else if (image === null && saved.image) saved = await api<Layout>(`/layouts/${saved.id}/image`, { method: "DELETE" });
+      return saved;
+    },
+    onSuccess: (l) => {
+      qc.setQueryData(keys.layout(l.id), l);
+      void qc.invalidateQueries({ queryKey: keys.layouts });
+    },
+  });
+}
+
+export function useDeleteLayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/layouts/${id}`, { method: "DELETE" }),
+    onSuccess: (_, id) => {
+      qc.removeQueries({ queryKey: keys.layout(id), exact: true });
+      void qc.invalidateQueries({ queryKey: keys.layouts });
+    },
+  });
+}
+
 export const usePresetTest = () =>
   useMutation({
     mutationFn: ({ controllerId, preset }: { controllerId: string; preset: PresetInput }) =>
@@ -396,6 +454,9 @@ export function useServerEvents() {
           // Presets linked to an effect render differently once it changes.
           void qc.invalidateQueries({ queryKey: keys.effects });
           void qc.invalidateQueries({ queryKey: keys.syncPlans });
+          break;
+        case "layouts.changed":
+          void qc.invalidateQueries({ queryKey: keys.layouts });
           break;
         case "sync.completed":
           void qc.invalidateQueries({ queryKey: keys.syncPlan(event.controllerId) });

@@ -165,6 +165,45 @@ export const layeredEffect = layeredEffectInput.extend({
 });
 export type LayeredEffect = z.infer<typeof layeredEffect>;
 
+/** A point on a layout's image, as fractions of its width and height (0–1). */
+export const layoutPoint = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
+export type LayoutPoint = z.infer<typeof layoutPoint>;
+
+/**
+ * A straight run of lights on a layout, from its first light (`from`) to its last (`to`), spaced evenly.
+ * A line with no lights is a gap: drawn, but using no LED numbers.
+ */
+export const layoutLine = z.object({
+  id: z.string().min(1).max(40),
+  name: z.string().max(40).optional(),
+  /** The controller driving these lights; null when not assigned to one. */
+  controllerId: z.string().nullable(),
+  from: layoutPoint,
+  to: layoutPoint,
+  count: z.number().int().min(0).max(2000),
+  /** The LED number of the first light on its controller; absent continues after the controller's previous line. */
+  firstLed: z.number().int().min(0).max(65535).optional(),
+});
+export type LayoutLine = z.infer<typeof layoutLine>;
+
+export const layoutInput = z.object({
+  name: z.string().trim().min(1).max(64),
+  /** In order: lines without a first LED continue after the previous line on the same controller. */
+  lines: z.array(layoutLine).max(200),
+  /** Diameter of a light, in screen pixels. */
+  ledSize: z.number().int().min(2).max(40),
+});
+export type LayoutInput = z.infer<typeof layoutInput>;
+
+export const layout = layoutInput.extend({
+  id: z.string(),
+  /** The picture the lights are drawn on, served from /api/layouts/:id/image. */
+  image: z.object({ type: z.string(), width: z.number().int(), height: z.number().int() }).nullable(),
+  revision: z.number().int(),
+  updatedAt: z.string(),
+});
+export type Layout = z.infer<typeof layout>;
+
 export const presetFolder = z.string().trim().min(1).max(40);
 
 /** Moves presets into a group (folder), or out of any (null). */
@@ -409,5 +448,6 @@ export type ServerEvent =
   | { type: "palettes.changed" }
   | { type: "presets.changed" }
   | { type: "effects.changed" }
+  | { type: "layouts.changed" }
   | { type: "sync.completed"; controllerId: string }
   | { type: "settings.changed" };
