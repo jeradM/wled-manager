@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   applyGroupEdit,
+  duplicateSegment,
   removeGroupMember,
   renumberSegments,
   type Palette,
@@ -53,7 +54,11 @@ export function Simulator() {
   });
   const loaded = presets.find((p) => p.id === presetId && p.kind === "state");
   const [state, setState] = useState<PresetState>(scratchState);
+  // Segment groups by position in state.seg, as in the preset editor.
+  const [groups, setGroups] = useState<SegmentGroup[]>([]);
+  /** The saved state and groups, to tell whether there are unsaved changes and to revert to. */
   const [savedJson, setSavedJson] = useState<string | null>(null);
+  const snapshot = (st: PresetState, gs: SegmentGroup[] | undefined) => JSON.stringify({ state: st, groups: gs ?? [] });
   const [savedAt, setSavedAt] = useState<string | null>(null);
   // By position in state.seg. Simulator only: neither is saved with the preset.
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
@@ -76,12 +81,13 @@ export function Simulator() {
     if (!loaded || loadedId.current === loaded.id) return;
     loadedId.current = loaded.id;
     setState(structuredClone(loaded.state!));
-    setSavedJson(JSON.stringify(loaded.state));
+    setGroups(structuredClone(loaded.groups ?? []));
+    setSavedJson(snapshot(loaded.state!, loaded.groups));
     setSavedAt(null);
     setCollapsed(new Set());
     setHidden(new Set());
   }, [loaded]);
-  const dirty = savedJson !== null && JSON.stringify(state) !== savedJson;
+  const dirty = savedJson !== null && snapshot(state, groups) !== savedJson;
 
   useEffect(() => {
     const leave = (e: BeforeUnloadEvent) => {
@@ -96,6 +102,7 @@ export function Simulator() {
     loadedId.current = null;
     if (!id) {
       setState(scratchState());
+      setGroups([]);
       setSavedJson(null);
       setCollapsed(new Set());
       setHidden(new Set());
@@ -105,12 +112,12 @@ export function Simulator() {
 
   const save = () => {
     if (!loaded) return;
-    const { id, revision: _r, updatedAt: _u, ...input } = loaded;
+    const { id, revision: _r, updatedAt: _u, groups: _g, ...input } = loaded;
     write.mutate(
-      { id, input: { ...input, state } },
+      { id, input: { ...input, state, ...(groups.length ? { groups } : {}) } },
       {
         onSuccess: (p) => {
-          setSavedJson(JSON.stringify(p.state));
+          setSavedJson(snapshot(p.state!, p.groups));
           setSavedAt(new Date().toLocaleTimeString());
         },
       },
@@ -128,17 +135,17 @@ export function Simulator() {
   /** The simulator's setup as a preset, leaving out segments hidden in the simulator. */
   const newPresetState = (): { state: PresetState; groups: SegmentGroup[] } => {
     let seg = [...state.seg];
-    let groups = loaded?.groups ?? [];
+    let presetGroups = groups;
     // As in the preset editor: with clear markers present, a removed segment becomes one, keeping positions (IDs).
     const markers = seg.some(isClearMarker);
     for (const i of [...hidden].sort((a, b) => b - a)) {
       if (i >= seg.length) continue;
       if (markers) seg[i] = { id: seg[i]!.id ?? i, stop: 0 };
       else seg = seg.filter((_, j) => j !== i);
-      groups = removeGroupMember(groups, i, !markers);
+      presetGroups = removeGroupMember(presetGroups, i, !markers);
     }
     const next = markers ? { ...state, seg } : renumberSegments({ ...state, seg });
-    return { state: next, groups: groups.filter((g) => g.members.length > 0) };
+    return { state: next, groups: presetGroups.filter((g) => g.members.length > 0) };
   };
   const kept = state.seg.filter((s, i) => !isClearMarker(s) && !hidden.has(i)).length;
   const create = () => {
@@ -174,7 +181,6 @@ export function Simulator() {
   };
 
   const segments = state.seg;
-  const groups = loaded?.groups ?? [];
   const groupOf = (i: number) => groups.find((g) => g.members.includes(i));
   const setSegment = (i: number, next: Segment) => {
     const g = groupOf(i);
@@ -182,6 +188,18 @@ export function Simulator() {
     const seg = g ? applyGroupEdit(segments, g.members, settingsOnly(segments[i]!), settingsOnly(next)) : [...segments];
     seg[i] = next;
     setState({ ...state, seg });
+  };
+  const real = segments.flatMap((s, p) => (isClearMarker(s) ? [] : [p]));
+  const realCount = real.length;
+  /** Adds a copy of segment `i` right below it, in its group. Real segments move ahead of clear markers. */
+  const copySegment = (i: number) => {
+    const copied = duplicateSegment(state, groups, i);
+    const at = real.indexOf(i);
+    const moved = (set: Set<number>) => new Set([...set].flatMap((p) => (real.includes(p) ? [real.indexOf(p) + (real.indexOf(p) > at ? 1 : 0)] : [])));
+    setState(copied.state);
+    setGroups(copied.groups);
+    setHidden(moved(hidden));
+    setCollapsed(moved(collapsed));
   };
   const rgbw = rgbwChoice ?? segments.some((s) => s.col?.some((c) => Array.isArray(c) && c.length === 4));
   const statePresets = presets.filter((p) => p.kind === "state").sort((a, b) => a.slot - b.slot);
@@ -212,7 +230,15 @@ export function Simulator() {
             </select>
             {loaded && (
               <>
-                <Button onClick={() => savedJson && setState(JSON.parse(savedJson) as PresetState)} disabled={!dirty}>
+                <Button
+                  onClick={() => {
+                    if (!savedJson) return;
+                    const saved = JSON.parse(savedJson) as { state: PresetState; groups: SegmentGroup[] };
+                    setState(saved.state);
+                    setGroups(saved.groups);
+                  }}
+                  disabled={!dirty}
+                >
                   Revert
                 </Button>
                 <Button variant="primary" onClick={save} disabled={!dirty || write.isPending}>
@@ -401,7 +427,14 @@ export function Simulator() {
                     {fxName} · LEDs {s.start ?? 0}–{(s.stop ?? count) - 1}
                   </span>
                 </span>
-                {showToggle}
+                <span className="flex items-center gap-3 text-xs">
+                  {showToggle}
+                  {realCount < 32 && (
+                    <button type="button" onClick={() => copySegment(i)} className="text-sky-400 hover:text-sky-300" title="Add a copy of this segment right below it">
+                      Copy
+                    </button>
+                  )}
+                </span>
               </div>
             );
           }
@@ -426,10 +459,12 @@ export function Simulator() {
                 }
                 hideGeometry={!!s.sid}
                 onChange={(next) => setSegment(i, next)}
+                onCopy={realCount < 32 ? () => copySegment(i) : undefined}
                 onRemove={
-                  segments.filter((x) => !isClearMarker(x)).length > 1
+                  realCount > 1
                     ? () => {
                         setState({ ...state, seg: segments.filter((_, j) => j !== i) });
+                        setGroups(removeGroupMember(groups, i, true));
                         setCollapsed(without(collapsed, i));
                         setHidden(without(hidden, i));
                       }
@@ -457,7 +492,7 @@ export function Simulator() {
             while (ids.has(id)) id++;
             setState({ ...state, seg: [...segments, { ...newSegment(rgbw), id }] });
           }}
-          disabled={segments.filter((s) => !isClearMarker(s)).length >= 32}
+          disabled={realCount >= 32}
         >
           Add segment
         </Button>

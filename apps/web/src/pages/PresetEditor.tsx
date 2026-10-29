@@ -7,6 +7,7 @@ import {
   joinGroup,
   linkSegment,
   litLeds,
+  duplicateSegment,
   moveSegment,
   overlappingSegments,
   presetState,
@@ -119,6 +120,10 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
       }),
       groups: removeGroupMember(groups, i, !markers),
     });
+  const copySegment = (i: number) => {
+    const copied = duplicateSegment(draft.state!, groups, i);
+    setDraft({ ...draft, state: copied.state, groups: copied.groups });
+  };
   const move = (from: number, to: number) => {
     const moved = moveSegment(draft.state!, groups, from, to);
     setDraft({ ...draft, state: moved.state, groups: moved.groups });
@@ -313,6 +318,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
           }
           onChange={(next) => setSegment(i, next)}
           onRemove={() => removeSegment(i)}
+          onCopy={realCount < maxSegments ? () => copySegment(i) : undefined}
           leading={
             <span className="flex items-center">
               <span

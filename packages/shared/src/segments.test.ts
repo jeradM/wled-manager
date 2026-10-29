@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Segment, SegmentDefinition } from "./schemas.js";
 import {
   applyGroupEdit,
+  duplicateSegment,
   indicesToSpans,
   joinGroup,
   linkSegment,
@@ -253,6 +254,22 @@ describe("moving segments and groups", () => {
     const moved = moveSegment({ seg: [{ fx: 1 }, { fx: 2 }, { fx: 3 }] }, [], 0, 2);
     expect(moved.state.seg.map((s) => s.fx)).toEqual([2, 3, 1]);
     expect(moved.state.mainseg).toBeUndefined();
+  });
+
+  it("copies a segment right after itself, into its group", () => {
+    const copied = duplicateSegment(state, groups, 0);
+    expect(copied.state.seg).toEqual([
+      { id: 0, fx: 10 },
+      { id: 1, fx: 10 },
+      { id: 2, fx: 11 },
+      { id: 3, fx: 12 },
+      { id: 4, stop: 0 },
+    ]);
+    expect(copied.state.mainseg).toBe(3);
+    expect(copied.groups).toEqual([{ name: "G", members: [0, 1, 3] }]);
+    // Without clear markers the preset grows by one.
+    const plain = duplicateSegment({ seg: [{ fx: 1, col: [[1, 2, 3]] }, { fx: 2 }] }, [], 1);
+    expect(plain.state.seg).toEqual([{ id: 0, fx: 1, col: [[1, 2, 3]] }, { id: 1, fx: 2 }, { id: 2, fx: 2 }]);
   });
 
   it("drops removed segments from groups", () => {

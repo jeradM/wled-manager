@@ -22,6 +22,8 @@ interface Props {
   markers: LedMarker[];
   onChange: (s: Segment) => void;
   onRemove?: () => void;
+  /** Adds a copy of this segment right below it. */
+  onCopy?: () => void;
   /** Heading; defaults to "Segment <id>". */
   title?: ReactNode;
   /** Shown before the heading, e.g. a drag handle. */
@@ -47,6 +49,7 @@ export function SegmentEditor({
   markers,
   onChange,
   onRemove,
+  onCopy,
   title,
   leading,
   headerExtra,
@@ -79,6 +82,11 @@ export function SegmentEditor({
             <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
             All controls
           </label>
+          {onCopy && (
+            <button type="button" onClick={onCopy} className="text-sky-400 hover:text-sky-300" title="Add a copy of this segment right below it">
+              Copy
+            </button>
+          )}
           {onRemove && (
             <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-300">Remove</button>
           )}

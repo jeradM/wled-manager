@@ -229,6 +229,26 @@ export function moveSegment(
 }
 
 /**
+ * Copies the segment at array position `position`, placing the copy right after it among the real segments
+ * and in the same group. Segment IDs are renumbered to the new order; with clear markers present, the copy
+ * uses up one of them so the preset keeps its length.
+ */
+export function duplicateSegment(
+  state: PresetState,
+  groups: SegmentGroup[],
+  position: number,
+): { state: PresetState; groups: SegmentGroup[] } {
+  const copyAt = state.seg.length;
+  const withCopy = { ...state, seg: [...state.seg, structuredClone(state.seg[position]!)] };
+  const real = state.seg.flatMap((s, p) => (isClearMarker(s) ? [] : [p]));
+  const order = [...real];
+  order.splice(real.indexOf(position) + 1, 0, copyAt);
+  const markers = state.seg.length - real.length;
+  const grouped = groups.map((g) => (g.members.includes(position) ? { ...g, members: [...g.members, copyAt] } : g));
+  return reorder(withCopy, grouped, order, markers ? state.seg.length : 0);
+}
+
+/**
  * Gives every segment its array position as ID. WLED applies preset segments by ID, so two segments sharing
  * one would overwrite each other. The main segment follows its segment.
  */
