@@ -12,6 +12,8 @@ import type {
   Palette,
   PaletteInput,
   PaletteStop,
+  LayeredEffect,
+  LayeredEffectInput,
   Preset,
   PresetInput,
   QuickControl,
@@ -34,6 +36,8 @@ export const keys = {
   palette: (id: string) => ["palettes", id] as const,
   presets: ["presets"] as const,
   preset: (id: string) => ["presets", id] as const,
+  effects: ["effects"] as const,
+  effect: (id: string) => ["effects", id] as const,
   catalog: (id: string) => ["controllers", id, "catalog"] as const,
   importPreview: (id: string) => ["controllers", id, "import"] as const,
   settings: ["settings"] as const,
@@ -246,6 +250,37 @@ export function useDeletePreset() {
   });
 }
 
+export const useLayeredEffects = () => useQuery({ queryKey: keys.effects, queryFn: () => api<LayeredEffect[]>("/effects") });
+
+export const useLayeredEffect = (id: string | undefined) =>
+  useQuery({ queryKey: keys.effect(id ?? ""), queryFn: () => api<LayeredEffect>(`/effects/${id}`), enabled: !!id });
+
+/** Creates a layered effect (no id) or saves one. */
+export function useWriteLayeredEffect() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id?: string; input: LayeredEffectInput }) =>
+      id
+        ? api<LayeredEffect>(`/effects/${id}`, { method: "PUT", body: JSON.stringify(input) })
+        : api<LayeredEffect>("/effects", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: (e) => {
+      qc.setQueryData(keys.effect(e.id), e);
+      void qc.invalidateQueries({ queryKey: keys.effects });
+    },
+  });
+}
+
+export function useDeleteLayeredEffect() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/effects/${id}`, { method: "DELETE" }),
+    onSuccess: (_, id) => {
+      qc.removeQueries({ queryKey: keys.effect(id), exact: true });
+      void qc.invalidateQueries({ queryKey: keys.effects });
+    },
+  });
+}
+
 export const usePresetTest = () =>
   useMutation({
     mutationFn: ({ controllerId, preset }: { controllerId: string; preset: PresetInput }) =>
@@ -343,6 +378,9 @@ export function useServerEvents() {
         case "presets.changed":
           void qc.invalidateQueries({ queryKey: keys.presets });
           void qc.invalidateQueries({ queryKey: keys.syncPlans });
+          break;
+        case "effects.changed":
+          void qc.invalidateQueries({ queryKey: keys.effects });
           break;
         case "sync.completed":
           void qc.invalidateQueries({ queryKey: keys.syncPlan(event.controllerId) });

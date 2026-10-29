@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { Layer, Palette } from "@wled-manager/shared";
-import type { Catalog } from "../../queries";
+import { useLayeredEffects, useWriteLayeredEffect, type Catalog } from "../../queries";
 import { LayerEditor, layerEffectName } from "./LayerEditor";
 import { newSegment } from "./describe";
 
@@ -16,7 +16,8 @@ const iconButton = "px-1 text-neutral-400 hover:text-neutral-100 disabled:opacit
 export function LayerStack({
   layers,
   onChange,
-  canAdd,
+  room = Infinity,
+  saveAsEffect = true,
   catalog,
   library,
   rgbw,
@@ -26,8 +27,10 @@ export function LayerStack({
   /** Bottom to top. */
   layers: Layer[];
   onChange: (layers: Layer[]) => void;
-  /** Whether there's room for another layer (each layer is a WLED segment). */
-  canAdd: boolean;
+  /** How many more layers fit (each layer is a WLED segment). */
+  room?: number;
+  /** Offer "Save as a layered effect". */
+  saveAsEffect?: boolean;
   catalog: Catalog | undefined;
   library: Palette[];
   rgbw: boolean;
@@ -36,6 +39,9 @@ export function LayerStack({
   /** Called when layers move or go, with each old index's new one (undefined when removed). */
   onRemap?: (map: (k: number) => number | undefined) => void;
 }) {
+  const { data: effects = [] } = useLayeredEffects();
+  const saveEffect = useWriteLayeredEffect();
+  const canAdd = room >= 1;
   // By layer index (0 = bottom).
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [showAll, setShowAll] = useState<Set<number>>(new Set());
@@ -67,8 +73,23 @@ export function LayerStack({
   };
   const onAdd = (v: string) => {
     const top = layers.length - 1;
-    if (v === "blank") insertAbove(top, newLayer(rgbw));
-    else if (v === "copy") insertAbove(top, structuredClone(layers[top]!));
+    const [action, id] = v.split(":");
+    const effect = effects.find((e) => e.id === id);
+    if (action === "blank") insertAbove(top, newLayer(rgbw));
+    else if (action === "copy") insertAbove(top, structuredClone(layers[top]!));
+    else if (action === "add" && effect) update([...layers, ...structuredClone(effect.layers)], (j) => j);
+    else if (action === "replace" && effect) update(structuredClone(effect.layers), () => undefined);
+    else if (action === "save") {
+      saveEffect.reset();
+      setNaming("");
+    }
+  };
+  // "Save as a layered effect": the name being typed.
+  const [naming, setNaming] = useState<string | null>(null);
+  const save = () => {
+    const name = naming?.trim();
+    if (!name) return;
+    saveEffect.mutate({ input: { name, layers } }, { onSuccess: () => setNaming(null) });
   };
 
   const allControls = (k: number) => (
@@ -77,20 +98,71 @@ export function LayerStack({
       All controls
     </label>
   );
-  // Later: "Apply effect…" entries add an effect's layers here.
   const addPicker = (
-    <select
-      value=""
-      onChange={(e) => onAdd(e.target.value)}
-      disabled={!canAdd}
-      aria-label="Add layer"
-      title={canAdd ? "Add a layer on top: another effect on the same LEDs" : "No room: each layer is a WLED segment"}
-      className="w-fit rounded-md border border-dashed border-neutral-700 bg-transparent px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800 disabled:opacity-40"
-    >
-      <option value="" disabled>+ Add layer…</option>
-      <option value="blank">Blank layer (Solid)</option>
-      <option value="copy">Copy of the top layer</option>
-    </select>
+    <span className="flex items-center gap-2">
+      <select
+        value=""
+        onChange={(e) => onAdd(e.target.value)}
+        aria-label="Add layer"
+        title="Add a layer on top (another effect on the same LEDs), or apply a layered effect"
+        className="w-fit rounded-md border border-dashed border-neutral-700 bg-transparent px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800"
+      >
+        <option value="" disabled>+ Add layer…</option>
+        <option value="blank" disabled={!canAdd}>Blank layer (Solid)</option>
+        <option value="copy" disabled={!canAdd}>Copy of the top layer</option>
+        {effects.length > 0 && (
+          <optgroup label="Add a layered effect on top">
+            {effects.map((e) => (
+              <option key={e.id} value={`add:${e.id}`} disabled={e.layers.length > room}>
+                {e.name} ({e.layers.length} layer{e.layers.length === 1 ? "" : "s"}){e.layers.length > room ? " – no room" : ""}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {effects.length > 0 && (
+          <optgroup label="Replace these layers with">
+            {effects.map((e) => (
+              <option key={e.id} value={`replace:${e.id}`} disabled={e.layers.length - layers.length > room}>
+                {e.name}
+                {e.layers.length - layers.length > room ? " – no room" : ""}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {saveAsEffect && (
+          <optgroup label="Library">
+            <option value="save">Save these layers as a layered effect…</option>
+          </optgroup>
+        )}
+      </select>
+      {naming !== null && (
+        <form
+          className="flex items-center gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
+          <input
+            value={naming}
+            onChange={(e) => setNaming(e.target.value)}
+            maxLength={64}
+            autoFocus
+            placeholder="Layered effect name"
+            aria-label="Layered effect name"
+            className="w-44 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-xs"
+          />
+          <button type="submit" disabled={!naming.trim() || saveEffect.isPending} className="text-xs text-sky-400 hover:text-sky-300 disabled:opacity-40">
+            Save
+          </button>
+          <button type="button" onClick={() => setNaming(null)} className="text-xs text-neutral-400 hover:text-neutral-200">
+            Cancel
+          </button>
+        </form>
+      )}
+      {naming === null && saveEffect.isSuccess && <span className="text-xs text-emerald-400">Saved "{saveEffect.data.name}" to layered effects</span>}
+      {saveEffect.isError && <span className="text-xs text-red-400">Couldn't save: {saveEffect.error.message}</span>}
+    </span>
   );
 
   // One layer: the editor as it always was, with a way to add more.

@@ -30,8 +30,8 @@ interface Props {
   hideGeometry?: boolean;
   /** Left border color, e.g. the segment's group. */
   accent?: string;
-  /** Whether there's room for another layer (each layer is a WLED segment). Defaults to true. */
-  canAddLayer?: boolean;
+  /** How many more layers fit (each layer is a WLED segment). Defaults to no limit. */
+  layerRoom?: number;
   /** Shown in each layer's header; given the layer's index (0 = bottom). */
   layerExtra?: (k: number) => ReactNode;
   /** Called when layers move or go, with each old layer index's new one (undefined when removed). */
@@ -57,7 +57,7 @@ export function SegmentEditor({
   source,
   hideGeometry,
   accent,
-  canAddLayer = true,
+  layerRoom,
   layerExtra,
   onLayerRemap,
 }: Props) {
@@ -126,7 +126,7 @@ export function SegmentEditor({
       <LayerStack
         layers={segmentLayers(s)}
         onChange={(layers) => onChange(withLayers(s, layers))}
-        canAdd={canAddLayer}
+        room={layerRoom}
         catalog={catalog}
         library={library}
         rgbw={rgbw}

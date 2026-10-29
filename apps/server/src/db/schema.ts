@@ -1,5 +1,5 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import type { LedLayout, LedMarker, LedRange, PaletteStop, PaletteVariant, PresetState, SegmentDefinition, SegmentGroup } from "@wled-manager/shared";
+import type { Layer, LedLayout, LedMarker, LedRange, PaletteStop, PaletteVariant, PresetState, SegmentDefinition, SegmentGroup } from "@wled-manager/shared";
 import type { WledInfo } from "../wled/client.js";
 
 const timestamps = {
@@ -60,6 +60,15 @@ export const presets = sqliteTable("presets", {
   folder: text("folder"),
   /** Controllers the preset syncs to; null means all. */
   controllerIds: text("controller_ids", { mode: "json" }).$type<string[]>(),
+  revision: integer("revision").notNull().default(1),
+  ...timestamps,
+});
+
+export const layeredEffects = sqliteTable("layered_effects", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  /** Bottom to top. */
+  layers: text("layers", { mode: "json" }).$type<Layer[]>().notNull(),
   revision: integer("revision").notNull().default(1),
   ...timestamps,
 });

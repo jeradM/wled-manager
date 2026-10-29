@@ -324,7 +324,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
           onChange={(next) => setSegment(i, next)}
           onRemove={() => removeSegment(i)}
           onCopy={used + wledSegmentCount([s]) <= maxSegments ? () => copySegment(i) : undefined}
-          canAddLayer={used < maxSegments}
+          layerRoom={maxSegments - used}
           leading={
             <span className="flex items-center">
               <span
@@ -568,7 +568,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
                             library={palettes}
                             rgbw={rgbw}
                             markers={[]}
-                            canAddLayer={used + membersOf(k).length <= maxSegments}
+                            layerRoom={Math.floor((maxSegments - used) / membersOf(k).length)}
                             onChange={(next) =>
                               setState({ seg: keepPadding(segments, applyGroupEdit(segments, membersOf(k), segments[membersOf(k)[0]!]!, next)) })
                             }

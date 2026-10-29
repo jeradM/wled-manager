@@ -140,6 +140,24 @@ export const segmentGroup = z.object({
 });
 export type SegmentGroup = z.infer<typeof segmentGroup>;
 
+/**
+ * A layered effect: a stack of layers kept in the library, apart from any preset. Applying it to a segment
+ * copies its layers onto the segment.
+ */
+export const layeredEffectInput = z.object({
+  name: z.string().trim().min(1).max(64),
+  /** Bottom to top, as WLED draws them. */
+  layers: z.array(layer).min(1).max(32),
+});
+export type LayeredEffectInput = z.infer<typeof layeredEffectInput>;
+
+export const layeredEffect = layeredEffectInput.extend({
+  id: z.string(),
+  revision: z.number().int(),
+  updatedAt: z.string(),
+});
+export type LayeredEffect = z.infer<typeof layeredEffect>;
+
 export const presetFolder = z.string().trim().min(1).max(40);
 
 /** Moves presets into a group (folder), or out of any (null). */
@@ -374,5 +392,6 @@ export type ServerEvent =
   | { type: "controller.removed"; controllerId: string }
   | { type: "palettes.changed" }
   | { type: "presets.changed" }
+  | { type: "effects.changed" }
   | { type: "sync.completed"; controllerId: string }
   | { type: "settings.changed" };
