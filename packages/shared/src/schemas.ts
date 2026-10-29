@@ -171,6 +171,10 @@ export const presetFolder = z.string().trim().min(1).max(40);
 export const presetFolderMove = z.object({ ids: z.array(z.string()).min(1).max(250), folder: presetFolder.nullable() });
 export type PresetFolderMove = z.infer<typeof presetFolderMove>;
 
+/** Turns syncing on or off for presets. */
+export const presetSyncToggle = z.object({ ids: z.array(z.string()).min(1).max(250), sync: z.boolean() });
+export type PresetSyncToggle = z.infer<typeof presetSyncToggle>;
+
 const presetFields = {
   slot: z.number().int().min(1).max(250),
   name: z.string().min(1).max(64),
@@ -187,6 +191,11 @@ const presetFields = {
    * only syncs to controllers where at least one of them is defined.
    */
   controllers: z.array(z.string()).min(1).max(100).optional(),
+  /**
+   * false keeps the preset in the app only: syncing removes it from every controller (it keeps its slot and
+   * the controllers it was chosen for, for when it's turned back on). Absent means true.
+   */
+  sync: z.boolean().optional(),
 };
 
 const hasPayload = (p: { kind: PresetKind; state?: unknown; raw?: unknown }) =>

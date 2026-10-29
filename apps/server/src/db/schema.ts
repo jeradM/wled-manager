@@ -60,6 +60,8 @@ export const presets = sqliteTable("presets", {
   folder: text("folder"),
   /** Controllers the preset syncs to; null means all. */
   controllerIds: text("controller_ids", { mode: "json" }).$type<string[]>(),
+  /** false: kept in the app only, removed from controllers on sync. */
+  syncEnabled: integer("sync_enabled", { mode: "boolean" }).notNull().default(true),
   revision: integer("revision").notNull().default(1),
   ...timestamps,
 });

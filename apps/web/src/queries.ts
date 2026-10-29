@@ -238,6 +238,19 @@ export function useMovePresets() {
   });
 }
 
+/** Turns syncing on or off for presets; presets with sync off are removed from controllers on their next sync. */
+export function useSetPresetSync() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { ids: string[]; sync: boolean }) => api<Preset[]>("/presets/sync", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: (updated) => {
+      for (const p of updated) qc.setQueryData(keys.preset(p.id), p);
+      void qc.invalidateQueries({ queryKey: keys.presets });
+      void qc.invalidateQueries({ queryKey: keys.syncPlans });
+    },
+  });
+}
+
 export function useDeletePreset() {
   const qc = useQueryClient();
   return useMutation({

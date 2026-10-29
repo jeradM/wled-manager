@@ -658,6 +658,10 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
               preset={draft}
               controllers={controllers}
               onChange={(chosen) => setDraft({ ...draft, controllers: chosen })}
+              onSyncChange={(sync) => {
+                const { sync: _, ...rest } = draft;
+                setDraft(sync ? rest : { ...rest, sync: false });
+              }}
             />
           )}
           <TestPanel
@@ -865,12 +869,15 @@ function TargetsPanel({
   preset,
   controllers,
   onChange,
+  onSyncChange,
 }: {
   preset: PresetInput;
   controllers: Controller[];
   onChange: (chosen: string[] | undefined) => void;
+  onSyncChange: (sync: boolean) => void;
 }) {
   const chosen = preset.controllers;
+  const syncing = preset.sync !== false;
   const toggle = (id: string, on: boolean) => {
     const next = on ? [...(chosen ?? []), id] : (chosen ?? []).filter((x) => x !== id);
     // Keep at least one: an empty choice would sync nowhere.
@@ -879,34 +886,45 @@ function TargetsPanel({
   return (
     <Card className="flex h-fit flex-col gap-2 text-sm">
       <h2 className="font-medium">Syncs to</h2>
-      <label className="flex items-center gap-2">
-        <input type="radio" checked={!chosen} onChange={() => onChange(undefined)} />
-        All controllers
+      <label className="flex items-center gap-2" title="Off keeps the preset in the app only; the next sync removes it from controllers">
+        <input type="checkbox" checked={syncing} onChange={(e) => onSyncChange(e.target.checked)} />
+        Sync this preset to controllers
       </label>
-      <label className="flex items-center gap-2">
-        <input type="radio" checked={!!chosen} onChange={() => onChange(controllers.map((c) => c.id))} />
-        Only these:
-      </label>
-      <ul className="flex flex-col gap-1 pl-5">
-        {controllers.map((c) => {
-          const reason = presetSkipReason({ ...preset, controllers: undefined }, c, controllers);
-          const picked = !chosen || chosen.includes(c.id);
-          return (
-            <li key={c.id}>
-              <label className={`flex items-center gap-2 ${chosen ? "" : "text-neutral-400"}`}>
-                <input
-                  type="checkbox"
-                  checked={picked}
-                  disabled={!chosen || (picked && chosen.length === 1)}
-                  onChange={(e) => toggle(c.id, e.target.checked)}
-                />
-                {c.name}
-              </label>
-              {picked && reason && <p className="pl-6 text-xs text-amber-400">Skipped: {reason}.</p>}
-            </li>
-          );
-        })}
-      </ul>
+      {!syncing && (
+        <p className="rounded bg-neutral-800/60 px-2 py-1 text-xs text-neutral-300">
+          Kept in the app only. The next sync removes it from controllers; turn this back on to sync it to the controllers chosen below.
+        </p>
+      )}
+      <fieldset disabled={!syncing} className={`flex flex-col gap-2 ${syncing ? "" : "opacity-50"}`}>
+        <label className="flex items-center gap-2">
+          <input type="radio" checked={!chosen} onChange={() => onChange(undefined)} />
+          All controllers
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="radio" checked={!!chosen} onChange={() => onChange(controllers.map((c) => c.id))} />
+          Only these:
+        </label>
+        <ul className="flex flex-col gap-1 pl-5">
+          {controllers.map((c) => {
+            const reason = presetSkipReason({ ...preset, controllers: undefined, sync: undefined }, c, controllers);
+            const picked = !chosen || chosen.includes(c.id);
+            return (
+              <li key={c.id}>
+                <label className={`flex items-center gap-2 ${chosen ? "" : "text-neutral-400"}`}>
+                  <input
+                    type="checkbox"
+                    checked={picked}
+                    disabled={!chosen || (picked && chosen.length === 1)}
+                    onChange={(e) => toggle(c.id, e.target.checked)}
+                  />
+                  {c.name}
+                </label>
+                {picked && reason && <p className="pl-6 text-xs text-amber-400">Skipped: {reason}.</p>}
+              </li>
+            );
+          })}
+        </ul>
+      </fieldset>
       <p className="text-xs text-neutral-500">
         A preset using defined segments only goes to controllers where at least one of them is defined (by name on
         other controllers). Syncing removes it from controllers it no longer goes to.

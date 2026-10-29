@@ -162,10 +162,11 @@ export function resolveSegmentRef(sid: string, target: SegmentSource, all: Segme
 
 /** Why a preset doesn't sync to a controller, or undefined if it does. */
 export function presetSkipReason(
-  preset: Pick<PresetInput, "kind" | "state" | "controllers">,
+  preset: Pick<PresetInput, "kind" | "state" | "controllers" | "sync">,
   target: SegmentSource,
   all: SegmentSource[],
 ): string | undefined {
+  if (preset.sync === false) return "sync is turned off for this preset";
   if (preset.controllers && !preset.controllers.includes(target.id)) return "not chosen for this controller";
   if (preset.kind !== "state") return undefined;
   const sids = preset.state!.seg.flatMap((s) => (s.sid && !isClearMarker(s) ? [s.sid] : []));

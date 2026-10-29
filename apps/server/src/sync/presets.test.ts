@@ -105,6 +105,29 @@ describe("preset sync", () => {
     expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
   });
 
+  it("removes presets with sync turned off from the controller, keeping them in the app", async () => {
+    const c = await setup();
+    const xmas = await post<Preset>("/api/presets", statePreset(10, "Xmas", [{ fx: 0 }]));
+    await post("/api/presets", statePreset(11, "Everyday", [{ fx: 0 }]));
+    await post(`/api/controllers/${c.id}/sync`, {});
+    expect(Object.keys(devicePresets()).sort()).toEqual(["0", "10", "11"]);
+
+    const off = await post<Preset[]>("/api/presets/sync", { ids: [xmas.id], sync: false });
+    expect(off[0]).toMatchObject({ sync: false, slot: 10 });
+    const plan = await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`);
+    expect(plan.presets.find((p) => p.slot === 10)?.action).toBe("delete");
+    expect(plan.skippedPresets).toEqual([{ presetId: xmas.id, slot: 10, name: "Xmas", reason: "sync is turned off for this preset" }]);
+    await post(`/api/controllers/${c.id}/sync`, {});
+    expect(Object.keys(devicePresets()).sort()).toEqual(["0", "11"]);
+    expect((await get<Preset>(`/api/presets/${xmas.id}`)).name).toBe("Xmas");
+
+    // Back on: it returns at the next sync.
+    const on = await post<Preset[]>("/api/presets/sync", { ids: [xmas.id], sync: true });
+    expect(on[0]).not.toHaveProperty("sync");
+    await post(`/api/controllers/${c.id}/sync`, {});
+    expect(Object.keys(devicePresets()).sort()).toEqual(["0", "10", "11"]);
+  });
+
   it("removes device presets the library doesn't have, flagging ones it didn't write", async () => {
     const c = await setup();
     mock.files.set("/presets.json", JSON.stringify({ "0": {}, "5": { n: "Theirs", bri: 1 } }));

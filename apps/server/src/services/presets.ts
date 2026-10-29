@@ -21,6 +21,7 @@ const toPreset = (row: PresetRow): Preset => ({
   ...(row.groups?.length ? { groups: row.groups } : {}),
   ...(row.folder ? { folder: row.folder } : {}),
   ...(row.controllerIds?.length ? { controllers: row.controllerIds } : {}),
+  ...(row.syncEnabled ? {} : { sync: false }),
   revision: row.revision,
   updatedAt: row.updatedAt,
 });
@@ -36,6 +37,7 @@ const columns = (input: PresetInput) => ({
   groups: input.kind === "state" && input.groups?.length ? input.groups : null,
   folder: input.folder ?? null,
   controllerIds: input.controllers?.length ? input.controllers : null,
+  syncEnabled: input.sync !== false,
 });
 
 export class PresetService {
@@ -79,11 +81,11 @@ export class PresetService {
     return toPreset(row);
   }
 
-  /** Creates the preset, or replaces whatever preset occupies its slot (staying in that preset's group). */
+  /** Creates the preset, or replaces whatever preset occupies its slot (keeping that preset's group and sync setting). */
   upsertBySlot(input: PresetInput): Preset {
     const existing = this.bySlot(input.slot);
     if (!existing) return this.create(input);
-    return this.update(existing.id, { ...input, folder: input.folder ?? existing.folder });
+    return this.update(existing.id, { ...input, folder: input.folder ?? existing.folder, sync: input.sync ?? existing.sync });
   }
 
   /** Puts presets in a group, or in none (null). Renaming a group moves all of its presets. */
@@ -91,6 +93,18 @@ export class PresetService {
     const rows = this.db
       .update(presets)
       .set({ folder, updatedAt: new Date().toISOString() })
+      .where(inArray(presets.id, ids))
+      .returning()
+      .all();
+    this.events.publish({ type: "presets.changed" });
+    return rows.map(toPreset);
+  }
+
+  /** Turns syncing on or off for presets. */
+  setSync(ids: string[], sync: boolean): Preset[] {
+    const rows = this.db
+      .update(presets)
+      .set({ syncEnabled: sync, revision: sql`${presets.revision} + 1`, updatedAt: new Date().toISOString() })
       .where(inArray(presets.id, ids))
       .returning()
       .all();

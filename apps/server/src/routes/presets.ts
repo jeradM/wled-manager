@@ -1,6 +1,6 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { preset, presetFolderMove, presetInput } from "@wled-manager/shared";
+import { preset, presetFolderMove, presetInput, presetSyncToggle } from "@wled-manager/shared";
 import { customPaletteBase } from "../wled/client.js";
 
 const params = z.object({ id: z.string() });
@@ -19,6 +19,13 @@ export const presetRoutes: FastifyPluginAsyncZod = async (app) => {
     "/presets/folder",
     { schema: { body: presetFolderMove, response: { 200: z.array(preset) } } },
     async (req) => svc.setFolder(req.body.ids, req.body.folder),
+  );
+
+  /** Turns syncing on or off; presets with sync off are removed from controllers on their next sync. */
+  app.post(
+    "/presets/sync",
+    { schema: { body: presetSyncToggle, response: { 200: z.array(preset) } } },
+    async (req) => svc.setSync(req.body.ids, req.body.sync),
   );
 
   app.get("/presets/:id", { schema: { params, response: { 200: preset } } }, async (req) => svc.get(req.params.id));
