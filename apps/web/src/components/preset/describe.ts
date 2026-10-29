@@ -1,4 +1,4 @@
-import { isClearMarker, type Preset, type Segment } from "@wled-manager/shared";
+import { isClearMarker, segmentLayers, type Preset, type Segment } from "@wled-manager/shared";
 
 export { isClearMarker };
 
@@ -26,6 +26,7 @@ export function rawKind(raw: Record<string, unknown> | undefined): string {
 export function effectNames(p: Preset, effects: string[]): string[] {
   if (p.kind !== "state") return [];
   const names = realSegments(p)
+    .flatMap(segmentLayers)
     .filter((s) => s.fx !== undefined || s.fxName)
     .map((s) => s.fxName ?? effects[s.fx!] ?? `Effect ${s.fx}`);
   return [...new Set(names)];

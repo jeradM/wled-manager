@@ -63,6 +63,25 @@ describe("preset sync", () => {
     expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
   });
 
+  it("writes a segment's layers as WLED segments on the same LEDs", async () => {
+    const c = await setup();
+    await post(
+      "/api/presets",
+      statePreset(4, "Stack", [{ id: 0, start: 0, stop: 30, fx: 0, layers: [{ fx: 99, fxName: "Breathe", bm: 6, bri: 128 }] }, { id: 1, start: 30, stop: 60, fx: 0 }]),
+    );
+    await post(`/api/controllers/${c.id}/sync`, {});
+    expect(devicePresets()["4"]).toEqual({
+      bri: 100,
+      seg: [
+        { id: 0, start: 0, stop: 30, fx: 0 },
+        { id: 1, start: 0, stop: 30, fx: 2, bm: 6, bri: 128 },
+        { id: 2, start: 30, stop: 60, fx: 0 },
+      ],
+      n: "Stack",
+    });
+    expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
+  });
+
   it("removes device presets the library doesn't have, flagging ones it didn't write", async () => {
     const c = await setup();
     mock.files.set("/presets.json", JSON.stringify({ "0": {}, "5": { n: "Theirs", bri: 1 } }));
@@ -162,6 +181,30 @@ describe("import", () => {
     // A second preview now shows everything as already in the library.
     const again = await get<ImportPreview>(`/api/controllers/${c.id}/import`);
     expect(again.presets.every((p) => p.status === "identical")).toBe(true);
+  });
+
+  it("imports segments stacked on the same LEDs as layers, staying in sync", async () => {
+    const c = await setup();
+    mock.files.set(
+      "/presets.json",
+      JSON.stringify({
+        "0": {},
+        "5": {
+          seg: [
+            { id: 0, start: 0, stop: 60, fx: 0, n: "Roof" },
+            { id: 1, start: 0, stop: 60, fx: 2, bm: 6, n: "Roof" },
+            { id: 2, stop: 0 },
+          ],
+          n: "Stacked",
+        },
+      }),
+    );
+    await post(`/api/controllers/${c.id}/import`, { palettes: [], presets: [5] });
+    const [p] = await get<Preset[]>("/api/presets");
+    expect(p!.state!.seg).toHaveLength(2);
+    expect(p!.state!.seg[0]).toMatchObject({ n: "Roof", fx: 0, layers: [{ fx: 2, bm: 6, fxName: "Breathe" }] });
+    expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
+    expect(mock.writes).toEqual([]);
   });
 
   it("reports conflicts with different library presets in the same slot and replaces them on import", async () => {

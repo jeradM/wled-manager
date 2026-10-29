@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { presetSkipReason, stopsToCss, type Preset } from "@wled-manager/shared";
+import { presetPaletteIds, presetSkipReason, stopsToCss, type Preset } from "@wled-manager/shared";
 import { useCatalog, useControllers, useMovePresets, usePalettes, usePresets } from "../queries";
 import { effectNames, rawKind, realSegments } from "../components/preset/describe";
 import { Button, Card, ErrorText, PageHeader } from "../components/ui";
@@ -235,8 +235,7 @@ export function Presets() {
                     )}
                     {open &&
                       members.map((p) => {
-                        const used =
-                          p.kind === "state" ? p.state!.seg.flatMap((s) => (typeof s.pal === "object" ? [s.pal.paletteId] : [])) : [];
+                        const used = presetPaletteIds(p);
                         const usedPalettes = palettes.filter((x) => used.includes(x.id));
                         const targets = controllers.filter((c) => !presetSkipReason(p, c, controllers));
                         return (

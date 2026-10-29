@@ -8,6 +8,7 @@ import {
   linkSegment,
   litLeds,
   duplicateSegment,
+  keepPadding,
   moveSegment,
   overlappingSegments,
   presetState,
@@ -16,6 +17,7 @@ import {
   renumberSegments,
   resolveSegmentRef,
   setClearOthers,
+  wledSegmentCount,
   type Controller,
   type PresetInput,
   type PresetState,
@@ -108,7 +110,8 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
   const setGroups = (next: SegmentGroup[]) => setDraft({ ...draft, groups: next });
   const groupIndexOf = (i: number) => groups.findIndex((g) => g.members.includes(i));
   const wledSets = groupSets(segments, groups);
-  const setSegment = (i: number, next: Segment) => setState({ seg: segments.map((x, j) => (j === i ? next : x)) });
+  // Layers come and go here; a preset padded with clear markers keeps its WLED length.
+  const setSegment = (i: number, next: Segment) => setState({ seg: keepPadding(segments, segments.map((x, j) => (j === i ? next : x))) });
   // Array position is the segment ID when no "id" is given, so keep positions stable: with clear markers
   // present, removing a segment turns it into a marker and adding one takes the first marker's place.
   const removeSegment = (i: number) =>
@@ -122,7 +125,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
     });
   const copySegment = (i: number) => {
     const copied = duplicateSegment(draft.state!, groups, i);
-    setDraft({ ...draft, state: copied.state, groups: copied.groups });
+    setDraft({ ...draft, state: { ...copied.state, seg: keepPadding(segments, copied.state.seg) }, groups: copied.groups });
   };
   const move = (from: number, to: number) => {
     const moved = moveSegment(draft.state!, groups, from, to);
@@ -235,7 +238,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
     <select
       value=""
       onChange={(e) => onAdd(e.target.value, k)}
-      disabled={realCount >= maxSegments}
+      disabled={used >= maxSegments}
       aria-label={k === undefined ? "Add segment" : `Add segment to ${groups[k]!.name}`}
       className={
         k === undefined
@@ -259,8 +262,10 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
     </select>
   );
   const realCount = segments.length - markers;
+  /** WLED segments the preset's segments render to, one per layer. */
+  const used = wledSegmentCount(segments.filter((s) => !isClearMarker(s)));
   const toggleClearOthers = (on: boolean) => {
-    const next = setClearOthers(draft.state!, groups, on, Math.max(maxSegments, realCount));
+    const next = setClearOthers(draft.state!, groups, on, Math.max(maxSegments, used));
     setDraft({ ...draft, state: next.state, groups: next.groups });
   };
   /** One segment's card, draggable onto other segments. */
@@ -318,7 +323,8 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
           }
           onChange={(next) => setSegment(i, next)}
           onRemove={() => removeSegment(i)}
-          onCopy={realCount < maxSegments ? () => copySegment(i) : undefined}
+          onCopy={used + wledSegmentCount([s]) <= maxSegments ? () => copySegment(i) : undefined}
+          canAddLayer={used < maxSegments}
           leading={
             <span className="flex items-center">
               <span
@@ -562,8 +568,9 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
                             library={palettes}
                             rgbw={rgbw}
                             markers={[]}
+                            canAddLayer={used + membersOf(k).length <= maxSegments}
                             onChange={(next) =>
-                              setState({ seg: applyGroupEdit(segments, membersOf(k), segments[membersOf(k)[0]!]!, next) })
+                              setState({ seg: keepPadding(segments, applyGroupEdit(segments, membersOf(k), segments[membersOf(k)[0]!]!, next)) })
                             }
                           />
                         )
@@ -590,6 +597,11 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
                   )}
                   <div className="flex flex-wrap items-center gap-3">
                     {addPicker()}
+                    {used !== realCount && (
+                      <span className="text-xs text-neutral-500" title="Each layer is a WLED segment of its own on the same LEDs">
+                        {plural(realCount, "segment")} → {used} of {maxSegments} WLED segments
+                      </span>
+                    )}
                     {sourceController && (
                       <Link
                         to="/controllers/$id/segments"

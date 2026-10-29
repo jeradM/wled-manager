@@ -1,3 +1,4 @@
+import { PLACEMENT_KEYS } from "./layers.js";
 import type { LedMarker, LedRange, LedSpan, PresetInput, PresetState, Segment, SegmentDefinition, SegmentGroup } from "./schemas.js";
 
 /** A segment definition turned into WLED geometry: LEDs start..stop-1, running backwards when rev is set. */
@@ -203,12 +204,14 @@ function reorder(
 }
 
 /**
- * Turns "loading this preset turns the controller's other segments off" on (padding with clear markers up
- * to `maxSegments`) or off (no clear markers). Real segments move to the front, in order.
+ * Turns "loading this preset turns the controller's other segments off" on (padding with clear markers until
+ * the preset renders to `maxSegments` WLED segments, counting layers) or off (no clear markers). Real
+ * segments move to the front, in order.
  */
 export function setClearOthers(state: PresetState, groups: SegmentGroup[], on: boolean, maxSegments: number) {
   const real = state.seg.flatMap((s, p) => (isClearMarker(s) ? [] : [p]));
-  return reorder(state, groups, real, on ? maxSegments : 0);
+  const layers = real.reduce((n, p) => n + (state.seg[p]!.layers?.length ?? 0), 0);
+  return reorder(state, groups, real, on ? maxSegments - layers : 0);
 }
 
 /**
@@ -308,9 +311,6 @@ export function applyGroupEdit(seg: Segment[], members: number[], before: Segmen
     return next;
   });
 }
-
-/** What makes a segment itself rather than how it looks: its ID, LEDs, direction and name. */
-const PLACEMENT_KEYS = new Set(["id", "start", "stop", "rev", "sid", "n"]);
 
 /** `seg` with `template`'s settings (effect, colors, palette, grouping, …) but its own ID, LEDs and name. */
 export function withSettingsOf(seg: Segment, template: Segment): Segment {

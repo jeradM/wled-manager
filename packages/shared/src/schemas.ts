@@ -52,14 +52,8 @@ export type WledColor = z.infer<typeof wledColor>;
 export const paletteRef = z.union([z.number().int().min(0).max(255), z.object({ paletteId: z.string() })]);
 export type PaletteRef = z.infer<typeof paletteRef>;
 
-/**
- * A preset segment. Only the fields the editor understands are typed; everything else WLED stores
- * (grp, spc, of, rev, mi, cct, n, ...) is kept as-is. All fields are optional, as in WLED itself.
- */
-export const segment = z.looseObject({
-  id: z.number().int().optional(),
-  start: z.number().int().min(0).optional(),
-  stop: z.number().int().min(0).optional(),
+/** How a segment looks: everything but where it is (ID, LEDs, direction, name). */
+const layerFields = {
   on: z.boolean().optional(),
   bri: byte.optional(),
   fx: z.number().int().min(0).optional(),
@@ -83,6 +77,29 @@ export const segment = z.looseObject({
   spc: z.number().int().min(0).max(255).optional(),
   /** Offset: shifts the effect along the segment. */
   of: z.number().int().min(0).max(65535).optional(),
+};
+
+/**
+ * One look stacked on a segment's LEDs: effect, colors, palette, blend mode, opacity and the rest. Only the
+ * fields the editor understands are typed; anything else WLED stores (mi, cct, ...) is kept as-is.
+ */
+export const layer = z.looseObject(layerFields);
+export type Layer = z.infer<typeof layer>;
+
+/**
+ * A preset segment. Only the fields the editor understands are typed; everything else WLED stores
+ * (rev, mi, cct, n, ...) is kept as-is. All fields are optional, as in WLED itself.
+ */
+export const segment = z.looseObject({
+  id: z.number().int().optional(),
+  start: z.number().int().min(0).optional(),
+  stop: z.number().int().min(0).optional(),
+  ...layerFields,
+  /**
+   * More layers on the same LEDs, above the segment's own settings (its bottom layer), bottom to top
+   * (manager only). Each becomes a WLED segment on the same LEDs when the preset is rendered.
+   */
+  layers: z.array(layer).max(31).optional(),
   /**
    * The controller-defined segment this one uses (manager only, never sent to controllers). Its start, stop,
    * direction and name come from the definition on each controller when the preset is rendered; on a controller
@@ -100,6 +117,9 @@ export const presetState = z.looseObject({
   bs: z.number().int().min(0).max(255).optional(),
   mainseg: z.number().int().optional(),
   seg: z.array(segment).max(32),
+}).refine((st) => st.seg.reduce((n, s) => n + 1 + (s.layers?.length ?? 0), 0) <= 32, {
+  message: "a preset can have at most 32 WLED segments, counting each layer",
+  path: ["seg"],
 });
 export type PresetState = z.infer<typeof presetState>;
 
