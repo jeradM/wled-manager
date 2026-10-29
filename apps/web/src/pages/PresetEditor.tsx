@@ -36,7 +36,7 @@ import {
   useSavePreset,
 } from "../queries";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
-import { isClearMarker, newSegment, rawKind } from "../components/preset/describe";
+import { copyName, isClearMarker, newSegment, rawKind } from "../components/preset/describe";
 import { TRANSITION_STYLES } from "../components/preset/wled-options";
 import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
 
@@ -45,17 +45,22 @@ const GROUP_COLORS = ["#38bdf8", "#f472b6", "#a3e635", "#fbbf24", "#c084fc", "#2
 const groupColor = (k: number) => GROUP_COLORS[k % GROUP_COLORS.length]!;
 
 export function NewPreset() {
-  const { folder } = useSearch({ from: "/presets/new" });
-  return <PresetEditor folder={folder} />;
+  const { folder, from } = useSearch({ from: "/presets/new" });
+  return <PresetEditor key={from ?? ""} folder={folder} from={from} />;
 }
+
+/** The editor's settings handed to a duplicate, so it copies unsaved changes too. */
+let carried: { from: string; input: PresetInput } | null = null;
 
 export function EditPreset() {
   const { id } = useParams({ from: "/presets/$id" });
   return <PresetEditor id={id} />;
 }
 
-function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
+/** `from`: a preset to start a new one from (a duplicate). */
+function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from?: string }) {
   const { data: existing, error: loadError } = usePreset(id);
+  const { data: source, error: sourceError } = usePreset(from);
   const { data: allPresets = [], isSuccess: presetsLoaded } = usePresets();
   const { data: palettes = [] } = usePalettes();
   const { data: layeredEffects = [] } = useLayeredEffects();
@@ -89,13 +94,20 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
     if (existing) {
       const { id: _, revision, updatedAt, ...input } = existing;
       setDraft(input);
+    } else if (!id && !draft && presetsLoaded && from) {
+      // A duplicate: the same settings in a free slot, under a new name. The quick-load label stays with the original.
+      const copied = carried?.from === from ? carried.input : source ? (({ id: _, revision, updatedAt, ...input }) => input)(source) : null;
+      if (!copied) return;
+      carried = null;
+      const { ql: _ql, ...rest } = structuredClone(copied);
+      setDraft({ ...rest, slot: freeSlot, name: copyName(copied.name, allPresets) });
     } else if (!id && !draft && presetsLoaded) {
       // New presets turn the controller's other segments off, so only the segments added here show.
       const seg = Array.from({ length: 32 }, (_, id) => ({ id, stop: 0 }));
       setDraft({ slot: freeSlot, name: "", kind: "state", state: { on: true, bri: 128, transition: 7, seg }, ...(folder ? { folder } : {}) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existing, id, presetsLoaded]);
+  }, [existing, id, presetsLoaded, source]);
 
   const [jsonMode, setJsonMode] = useState(false);
   const [openGroup, setOpenGroup] = useState<number | null>(null);
@@ -104,7 +116,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
 
-  if (loadError) return <ErrorText error={loadError} />;
+  if (loadError || sourceError) return <ErrorText error={loadError ?? sourceError} />;
   if (!draft) return null;
 
   const setState = (patch: Partial<PresetState>) => setDraft({ ...draft, state: { ...draft.state!, ...patch } });
@@ -413,10 +425,21 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
   return (
     <div>
       <PageHeader
-        title={id ? `Edit ${existing?.name ?? "preset"}` : "New preset"}
+        title={id ? `Edit ${existing?.name ?? "preset"}` : source ? `Duplicate of ${source.name}` : "New preset"}
         actions={
           <>
             {id && <Button variant="danger" onClick={remove}>Delete</Button>}
+            {id && (
+              <Button
+                onClick={() => {
+                  carried = { from: id, input: draft };
+                  void navigate({ to: "/presets/new", search: { from: id } });
+                }}
+                title="Start a new preset from a copy of this one, including any changes made here. This preset keeps its saved settings."
+              >
+                Duplicate
+              </Button>
+            )}
             {id && draft.kind === "state" && (
               <Button onClick={() => navigate({ to: "/simulator", search: { preset: id } })} title="Try this preset on simulated LEDs">
                 Simulate

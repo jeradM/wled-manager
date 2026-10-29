@@ -67,7 +67,7 @@ export function Presets() {
   };
   // Ignore selected presets that have since been deleted.
   const selectedIds = presets.filter((p) => selected.has(p.id)).map((p) => p.id);
-  const columns = 5 + (controllers.length > 1 ? 1 : 0);
+  const columns = 6 + (controllers.length > 1 ? 1 : 0);
 
   return (
     <div>
@@ -138,6 +138,7 @@ export function Presets() {
                   <th className="px-4 py-2 font-medium">Contents</th>
                   <th className="px-4 py-2 font-medium">Palettes</th>
                   {controllers.length > 1 && <th className="px-4 py-2 font-medium">Syncs to</th>}
+                  <th className="w-24 px-4 py-2" aria-label="Actions" />
                 </tr>
               </thead>
               {sections.map(({ folder, presets: members }) => {
@@ -282,6 +283,16 @@ export function Presets() {
                                 {targets.length === controllers.length ? "All" : targets.map((c) => c.name).join(", ") || "None"}
                               </td>
                             )}
+                            <td className="px-4 py-2 text-right">
+                              <Link
+                                to="/presets/new"
+                                search={{ from: p.id }}
+                                className="text-xs text-sky-400 hover:text-sky-300"
+                                title="Start a new preset from a copy of this one"
+                              >
+                                Duplicate
+                              </Link>
+                            </td>
                           </tr>
                         );
                       })}

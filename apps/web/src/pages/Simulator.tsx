@@ -20,7 +20,7 @@ import { SIM_EFFECTS } from "@wled-manager/shared/sim";
 import { CATALOG, LedCanvas, isHidden, segmentName, simEffect, type Hidden } from "../components/sim/LedCanvas";
 import { useLayeredEffects, usePalettes, usePresets, useWritePreset } from "../queries";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
-import { isClearMarker, newSegment } from "../components/preset/describe";
+import { copyName, isClearMarker, newSegment } from "../components/preset/describe";
 import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
 
 const COUNT_KEY = "simLedCount";
@@ -307,7 +307,7 @@ export function Simulator() {
             )}
             <Button
               variant={loaded ? "secondary" : "primary"}
-              onClick={() => setCreating({ name: loaded ? `${loaded.name} copy` : "", slot: freeSlot() })}
+              onClick={() => setCreating({ name: loaded ? copyName(loaded.name, presets) : "", slot: freeSlot() })}
               disabled={!!creating}
             >
               Save as new preset

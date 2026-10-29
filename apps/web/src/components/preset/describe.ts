@@ -12,6 +12,14 @@ export const newSegment = (rgbw: boolean): Segment => ({
   pal: 0,
 });
 
+/** "Name copy", or "Name copy 2", "Name copy 3"… when that's taken: a name for a duplicate. */
+export function copyName(name: string, taken: { name: string }[]): string {
+  const names = new Set(taken.map((p) => p.name));
+  const base = `${name.replace(/ copy( \d+)?$/, "")} copy`.slice(0, 64);
+  if (!names.has(base)) return base;
+  for (let n = 2; ; n++) if (!names.has(`${base} ${n}`)) return `${base} ${n}`.slice(0, 64);
+}
+
 export const realSegments = (p: Preset) => (p.kind === "state" ? p.state!.seg.filter((s) => !isClearMarker(s)) : []);
 
 /** One-line description of a raw preset's type. */

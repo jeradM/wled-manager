@@ -89,7 +89,11 @@ const routeTree = rootRoute.addChildren([
     path: "/presets/new",
     component: NewPreset,
     // The group to start the new preset in, from a group's "+ New preset" link.
-    validateSearch: (s: Record<string, unknown>): { folder?: string } => (typeof s.folder === "string" && s.folder ? { folder: s.folder } : {}),
+    // folder: the group a new preset starts in. from: the preset a duplicate copies.
+    validateSearch: (s: Record<string, unknown>): { folder?: string; from?: string } => ({
+      ...(typeof s.folder === "string" && s.folder ? { folder: s.folder } : {}),
+      ...(typeof s.from === "string" && s.from ? { from: s.from } : {}),
+    }),
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/presets/$id", component: EditPreset }),
   createRoute({
