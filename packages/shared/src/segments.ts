@@ -272,7 +272,7 @@ export function groupSets(seg: Segment[], groups: SegmentGroup[]): number[] {
   const real = seg.flatMap((s, p) => (isClearMarker(s) ? [] : [p]));
   const allGrouped = real.length > 0 && real.every((p) => groups.some((g) => g.members.includes(p)));
   const first = allGrouped ? 0 : 1;
-  return groups.map((_, k) => Math.min(first + k, WLED_SET_COUNT - 1));
+  return groups.map((g, k) => g.set ?? Math.min(first + k, WLED_SET_COUNT - 1));
 }
 
 /** The WLED set of each preset segment (undefined for clear markers), or undefined if the preset has no groups. */

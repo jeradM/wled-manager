@@ -5,6 +5,7 @@ import {
   importPreset,
   paletteKey,
   paletteStopsFor,
+  segmentSets,
   type ImportPalette,
   type ImportPreset,
   type ImportPreview,
@@ -21,8 +22,16 @@ import type { PresetService } from "../services/presets.js";
 import { readDevice, type DeviceSnapshot } from "./device.js";
 import type { ControllerLocks } from "./locks.js";
 
-const comparable = (p: Pick<PresetInput, "name" | "ql" | "kind" | "state" | "raw">) =>
-  canonicalJson({ name: p.name, ql: p.ql ?? null, kind: p.kind, state: p.state ?? null, raw: p.raw ?? null });
+/** What decides whether a library preset matches a device preset: its settings and the WLED set each segment goes in. */
+const comparable = (p: Pick<PresetInput, "name" | "ql" | "kind" | "state" | "raw" | "groups">) =>
+  canonicalJson({
+    name: p.name,
+    ql: p.ql ?? null,
+    kind: p.kind,
+    state: p.state ?? null,
+    raw: p.raw ?? null,
+    sets: (p.state && segmentSets(p.state.seg, p.groups)) ?? null,
+  });
 
 /**
  * Pulls a controller's custom palettes and presets into the library. Only reads from the device. Imported

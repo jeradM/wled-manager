@@ -142,6 +142,8 @@ export type PresetKind = z.infer<typeof presetKind>;
 export const segmentGroup = z.object({
   name: z.string().min(1).max(32),
   members: z.array(z.number().int().min(0).max(31)).max(32),
+  /** The WLED segment set the group goes in, when it came from a controller's set; otherwise one is picked. */
+  set: z.number().int().min(0).max(3).optional(),
 });
 export type SegmentGroup = z.infer<typeof segmentGroup>;
 

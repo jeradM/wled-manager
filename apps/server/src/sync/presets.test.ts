@@ -230,6 +230,30 @@ describe("import", () => {
     expect(mock.writes).toEqual([]);
   });
 
+  it("imports the controller's segment sets as groups, staying in sync", async () => {
+    const c = await setup();
+    const device = {
+      seg: [
+        { id: 0, start: 0, stop: 20, fx: 0, set: 0 },
+        { id: 1, start: 20, stop: 40, fx: 2, set: 1 },
+        { id: 2, start: 40, stop: 60, fx: 2, set: 1 },
+      ],
+      n: "Grouped",
+    };
+    mock.files.set("/presets.json", JSON.stringify({ "0": {}, "7": device }));
+    // A library preset with the same settings but no groups isn't the same: re-importing adds the groups.
+    await post("/api/presets", { slot: 7, name: "Grouped", kind: "state", state: { seg: device.seg } });
+    const before = await get<ImportPreview>(`/api/controllers/${c.id}/import`);
+    expect(before.presets[0]!.status).toBe("conflict");
+
+    await post(`/api/controllers/${c.id}/import`, { palettes: [], presets: [7] });
+    const [p] = await get<Preset[]>("/api/presets");
+    expect(p!.groups).toEqual([{ name: "Set 1", members: [1, 2], set: 1 }]);
+    expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
+    expect((await get<ImportPreview>(`/api/controllers/${c.id}/import`)).presets[0]!.status).toBe("identical");
+    expect(mock.writes).toEqual([]);
+  });
+
   it("reports conflicts with different library presets in the same slot and replaces them on import", async () => {
     const c = await setup();
     deviceFiles();

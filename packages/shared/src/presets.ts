@@ -1,5 +1,5 @@
 import { expandLayers, hasEffectLinks, placementOf, resolveEffectLinks, segmentLayers, type EffectLookup } from "./layers.js";
-import type { Layer, PaletteRef, PresetInput, PresetState, Segment } from "./schemas.js";
+import type { Layer, PaletteRef, PresetInput, PresetState, Segment, SegmentGroup } from "./schemas.js";
 import { isClearMarker, segmentSets, type SegmentRefResolution } from "./segments.js";
 
 export type DevicePreset = Record<string, unknown>;
@@ -49,7 +49,22 @@ export function importPreset(slot: number, p: DevicePreset, ctx: ImportContext):
     }
     return out;
   });
-  return { ...base, kind: "state", state: { ...rest, seg: mergeLayers(seg) } as PresetState };
+  const merged = mergeLayers(seg);
+  const groups = setGroups(merged);
+  return { ...base, kind: "state", state: { ...rest, seg: merged } as PresetState, ...(groups.length ? { groups } : {}) };
+}
+
+/**
+ * Segments the controller put in segment sets 1–3 become groups, one per set, keeping the set number so
+ * the preset renders back unchanged. Segments in set 0 (the default) stay ungrouped.
+ */
+function setGroups(seg: Segment[]): SegmentGroup[] {
+  const bySet = new Map<number, number[]>();
+  seg.forEach((s, p) => {
+    if (isClearMarker(s) || typeof s.set !== "number" || s.set < 1 || s.set > 3) return;
+    bySet.set(s.set, [...(bySet.get(s.set) ?? []), p]);
+  });
+  return [...bySet.entries()].sort(([a], [b]) => a - b).map(([set, members]) => ({ name: `Set ${set}`, members, set }));
 }
 
 /**
@@ -59,9 +74,10 @@ export function importPreset(slot: number, p: DevicePreset, ctx: ImportContext):
  */
 function mergeLayers(seg: Segment[]): Segment[] {
   if (!seg.every((s, p) => (s.id ?? p) === p)) return seg;
+  // Layers share their segment's LEDs, name and segment set.
   const where = (s: Segment) => {
     const { id: _, ...place } = placementOf(s);
-    return canonicalJson(place);
+    return canonicalJson({ ...place, set: s.set });
   };
   const out: Segment[] = [];
   let prev: Segment | undefined;

@@ -140,6 +140,30 @@ describe("importPreset / renderPreset", () => {
     ]);
   });
 
+  it("turns the controller's segment sets into groups and renders them back unchanged", () => {
+    const device = {
+      seg: [
+        { id: 0, start: 0, stop: 10, fx: 0, set: 0 },
+        { id: 1, start: 10, stop: 20, fx: 2, set: 2 },
+        { id: 2, start: 20, stop: 30, fx: 2, set: 2 },
+        { id: 3, start: 0, stop: 30, fx: 1, set: 3 },
+        { id: 4, start: 0, stop: 30, fx: 0, bm: 6, set: 3 }, // a layer of segment 3
+      ],
+      n: "Sets",
+    };
+    const p = importPreset(8, device, { effects, libraryPalette });
+    expect(p.groups).toEqual([
+      { name: "Set 2", members: [1, 2], set: 2 },
+      { name: "Set 3", members: [3], set: 3 },
+    ]);
+    expect(p.state!.seg[3]!.layers).toHaveLength(1);
+    const { json, warnings } = renderPreset(p, { effects, devicePalette: () => undefined });
+    expect(warnings).toEqual([]);
+    expect(canonicalJson(json)).toBe(canonicalJson(device));
+    // Everything in set 0: no groups.
+    expect(importPreset(9, { seg: [{ id: 0, start: 0, stop: 5, set: 0 }], n: "Plain" }, { effects, libraryPalette }).groups).toBeUndefined();
+  });
+
   it("names unnamed presets by slot", () => {
     expect(importPreset(7, { seg: [] }, { effects, libraryPalette }).name).toBe("Preset 7");
   });
