@@ -7,6 +7,7 @@ import {
   keepPadding,
   removeGroupMember,
   renumberSegments,
+  resolveEffectLinks,
   segmentLayers,
   wledSegmentCount,
   withLayers,
@@ -17,7 +18,7 @@ import {
 } from "@wled-manager/shared";
 import { SIM_EFFECTS } from "@wled-manager/shared/sim";
 import { CATALOG, LedCanvas, isHidden, segmentName, simEffect, type Hidden } from "../components/sim/LedCanvas";
-import { usePalettes, usePresets, useWritePreset } from "../queries";
+import { useLayeredEffects, usePalettes, usePresets, useWritePreset } from "../queries";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
 import { isClearMarker, newSegment } from "../components/preset/describe";
 import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
@@ -57,6 +58,9 @@ export function Simulator() {
   const navigate = useNavigate();
   const { data: presets = [] } = usePresets();
   const { data: palettes = [] } = usePalettes();
+  const { data: layeredEffects = [] } = useLayeredEffects();
+  /** Layers of a layered effect, for segments linked to one. */
+  const effectLayers = (id: string) => layeredEffects.find((e) => e.id === id)?.layers;
   const write = useWritePreset();
 
   const [count, setCount] = useState(savedLedCount);
@@ -90,16 +94,30 @@ export function Simulator() {
   };
   /** Positions after removing the segment at `i`. */
   const without = (set: Set<number>, i: number) => new Set([...set].filter((j) => j !== i).map((j) => (j > i ? j - 1 : j)));
+  // Links to layered effects run as the effects' layers; hidden segments and layers are switched off.
+  const resolved = useMemo(() => resolveEffectLinks(state.seg, effectLayers), [state, layeredEffects]); // eslint-disable-line react-hooks/exhaustive-deps
   const simState = useMemo(
-    () =>
-      hidden.size
-        ? {
-            ...state,
-            seg: state.seg.map((s, i) => withLayers(s, segmentLayers(s).map((l, k) => (isHidden(hidden, i, k) ? { ...l, on: false } : l)))),
-          }
-        : state,
-    [state, hidden],
+    () => ({
+      ...state,
+      seg: resolved.seg.map((s, i) => {
+        if (!hidden.size || isClearMarker(s)) return s;
+        const from = resolved.sources[i]!;
+        return withLayers(s, segmentLayers(s).map((l, j) => (isHidden(hidden, i, from[j]?.layer ?? j) ? { ...l, on: false } : l)));
+      }),
+    }),
+    [state, resolved, hidden],
   );
+  /** How the LED details name segment i's resolved layer j, and whether it's hidden in the simulator. */
+  const layerInfo = (i: number, j: number) => {
+    const from = resolved.sources[i]?.[j];
+    const k = from?.layer ?? j;
+    const effect = from?.effectId !== undefined ? layeredEffects.find((e) => e.id === from.effectId) : undefined;
+    const stacked = !!state.seg[i]?.layers?.length || from?.effectId !== undefined;
+    return {
+      label: stacked ? `Layer ${k + 1}${effect ? ` · ${effect.name}, layer ${from!.effectLayer! + 1}` : ""}` : undefined,
+      hidden: isHidden(hidden, i, k),
+    };
+  };
 
   // Load the chosen preset once it arrives (and again after switching presets).
   const loadedId = useRef<string | null>(null);
@@ -175,7 +193,7 @@ export function Simulator() {
       presetGroups = removeGroupMember(presetGroups, i, !markers);
     }
     // A preset padded to turn other segments off stays at its WLED length.
-    seg = keepPadding(state.seg, seg);
+    seg = keepPadding(state.seg, seg, effectLayers);
     const next = markers ? { ...state, seg } : renumberSegments({ ...state, seg });
     return { state: next, groups: presetGroups.filter((g) => g.members.length > 0) };
   };
@@ -221,18 +239,18 @@ export function Simulator() {
     // A segment in a group shares its settings with the group, as in the preset editor; its LEDs stay its own.
     const seg = g ? applyGroupEdit(segments, g.members, settingsOnly(segments[i]!), settingsOnly(next)) : [...segments];
     seg[i] = next;
-    setState({ ...state, seg: keepPadding(segments, seg) });
+    setState({ ...state, seg: keepPadding(segments, seg, effectLayers) });
   };
   const real = segments.flatMap((s, p) => (isClearMarker(s) ? [] : [p]));
   const realCount = real.length;
   /** WLED segments the setup renders to, one per layer. */
-  const used = wledSegmentCount(real.map((p) => segments[p]!));
+  const used = wledSegmentCount(real.map((p) => segments[p]!), effectLayers);
   /** Adds a copy of segment `i` right below it, in its group. Real segments move ahead of clear markers. */
   const copySegment = (i: number) => {
     const copied = duplicateSegment(state, groups, i);
     const at = real.indexOf(i);
     const moved = (set: Set<number>) => new Set([...set].flatMap((p) => (real.includes(p) ? [real.indexOf(p) + (real.indexOf(p) > at ? 1 : 0)] : [])));
-    setState({ ...copied.state, seg: keepPadding(segments, copied.state.seg) });
+    setState({ ...copied.state, seg: keepPadding(segments, copied.state.seg, effectLayers) });
     setGroups(copied.groups);
     setHidden(remapSegments(hidden, (p) => (real.includes(p) ? real.indexOf(p) + (real.indexOf(p) > at ? 1 : 0) : undefined)));
     setCollapsed(moved(collapsed));
@@ -400,7 +418,7 @@ export function Simulator() {
             {loaded ? (dirty ? "Unsaved changes" : savedAt ? `Saved at ${savedAt}` : `Editing preset ${loaded.slot}`) : "Not linked to a preset"}
           </span>
         </div>
-        <LedCanvas state={simState} count={count} palettes={palettes} paused={paused} whiteLeds={rgbw} hidden={hidden} />
+        <LedCanvas state={simState} count={count} palettes={palettes} paused={paused} whiteLeds={rgbw} layerInfo={layerInfo} />
         {(unsimulated.length > 0 || outside > 0) && (
           <ul className="space-y-0.5 text-xs text-amber-400">
             {unsimulated.map((u) => (
@@ -475,7 +493,7 @@ export function Simulator() {
                 </span>
                 <span className="flex items-center gap-3 text-xs">
                   {showToggle}
-                  {used + wledSegmentCount([s]) <= 32 && (
+                  {used + wledSegmentCount([s], effectLayers) <= 32 && (
                     <button type="button" onClick={() => copySegment(i)} className="text-sky-400 hover:text-sky-300" title="Add a copy of this segment right below it">
                       Copy
                     </button>
@@ -505,7 +523,7 @@ export function Simulator() {
                 }
                 hideGeometry={!!s.sid}
                 onChange={(next) => setSegment(i, next)}
-                onCopy={used + wledSegmentCount([s]) <= 32 ? () => copySegment(i) : undefined}
+                onCopy={used + wledSegmentCount([s], effectLayers) <= 32 ? () => copySegment(i) : undefined}
                 layerRoom={32 - used}
                 onLayerRemap={(map) => setHidden(remapLayers(hidden, i, map))}
                 layerExtra={

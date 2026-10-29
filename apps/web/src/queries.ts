@@ -380,7 +380,9 @@ export function useServerEvents() {
           void qc.invalidateQueries({ queryKey: keys.syncPlans });
           break;
         case "effects.changed":
+          // Presets linked to an effect render differently once it changes.
           void qc.invalidateQueries({ queryKey: keys.effects });
+          void qc.invalidateQueries({ queryKey: keys.syncPlans });
           break;
         case "sync.completed":
           void qc.invalidateQueries({ queryKey: keys.syncPlan(event.controllerId) });

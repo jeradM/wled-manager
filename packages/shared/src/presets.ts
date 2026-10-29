@@ -1,4 +1,4 @@
-import { expandLayers, placementOf, segmentLayers } from "./layers.js";
+import { expandLayers, hasEffectLinks, placementOf, resolveEffectLinks, segmentLayers, type EffectLookup } from "./layers.js";
 import type { Layer, PaletteRef, PresetInput, PresetState, Segment } from "./schemas.js";
 import { isClearMarker, segmentSets, type SegmentRefResolution } from "./segments.js";
 
@@ -88,6 +88,10 @@ export interface RenderContext {
    * Without it, saved start/stop values are used.
    */
   segment?: (sid: string) => SegmentRefResolution;
+  /** Layers of the library's layered effects, for layers linked to one. */
+  effect?: EffectLookup;
+  /** Layered effect names, for warnings. */
+  effectName?: (effectId: string) => string | undefined;
 }
 
 export interface RenderedPreset {
@@ -111,7 +115,14 @@ export function renderPreset(preset: PresetInput, ctx: RenderContext): RenderedP
   const head = { n: preset.name, ...(preset.ql ? { ql: preset.ql } : {}) };
   if (preset.kind === "raw") return { json: { ...preset.raw, ...head }, warnings };
 
-  const segs = preset.state!.seg;
+  let segs = preset.state!.seg;
+  // Links to layered effects become the effects' current layers.
+  if (hasEffectLinks(segs)) {
+    const resolved = resolveEffectLinks(segs, ctx.effect ?? (() => undefined));
+    segs = resolved.seg;
+    for (const id of new Set(resolved.missing))
+      warnings.push(`layered effect "${ctx.effectName?.(id) ?? id}" no longer exists; its layers are left out`);
+  }
   const ids = segs.map((s, i) => s.id ?? i);
   const repeated = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
   if (repeated.length)

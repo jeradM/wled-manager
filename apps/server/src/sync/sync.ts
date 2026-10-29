@@ -24,6 +24,7 @@ import { controllerPaletteSlots, syncState } from "../db/schema.js";
 import type { EventBus } from "../events.js";
 import type { ControllerService } from "../services/controllers.js";
 import type { PaletteService } from "../services/palettes.js";
+import type { LayeredEffectService } from "../services/effects.js";
 import type { PresetService } from "../services/presets.js";
 import { hasModernPalettes, type WledClient } from "../wled/client.js";
 import { readDevice, type DeviceSnapshot } from "./device.js";
@@ -60,7 +61,14 @@ export class SyncService {
     private controllers: ControllerService,
     private palettes: PaletteService,
     private presets: PresetService,
+    private effects: LayeredEffectService,
   ) {}
+
+  /** Lookups for presets' links to layered effects. */
+  private effectContext() {
+    const all = new Map(this.effects.list().map((e) => [e.id, e]));
+    return { effect: (id: string) => all.get(id)?.layers, effectName: (id: string) => all.get(id)?.name };
+  }
 
   /**
    * Renders one preset for a controller using its current palette slots, for trying it out live.
@@ -82,6 +90,7 @@ export class SyncService {
       devicePalette: (id) => (slots.has(id) ? customPaletteId(slots.get(id)!, base) : undefined),
       paletteName: (id) => names.get(id),
       segment: this.segmentResolver(controllerId),
+      ...this.effectContext(),
     });
   }
 
@@ -183,6 +192,7 @@ export class SyncService {
       devicePalette: (id: string) => (slots[id] !== undefined ? customPaletteId(slots[id]!, device.base) : undefined),
       paletteName: (id: string) => paletteNames.get(id),
       segment: this.segmentResolver(controllerId),
+      ...this.effectContext(),
     };
     const desiredPresets = new Map<number, DevicePreset>();
     const writtenPresets = state?.writtenPresets ?? {};

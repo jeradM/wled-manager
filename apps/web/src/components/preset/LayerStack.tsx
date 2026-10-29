@@ -1,8 +1,10 @@
 import { useState, type ReactNode } from "react";
-import type { Layer, Palette } from "@wled-manager/shared";
+import { Link } from "@tanstack/react-router";
+import { resolveLayerLinks, type Layer, type LayeredEffect, type Palette } from "@wled-manager/shared";
 import { useLayeredEffects, useWriteLayeredEffect, type Catalog } from "../../queries";
 import { LayerEditor, layerEffectName } from "./LayerEditor";
 import { newSegment } from "./describe";
+import { BLEND_MODES } from "./wled-options";
 
 /** A layer added with "+ Add layer": solid amber, blended normally. */
 export const newLayer = (rgbw: boolean): Layer => ({ ...newSegment(rgbw), bm: 0 });
@@ -18,6 +20,7 @@ export function LayerStack({
   onChange,
   room = Infinity,
   saveAsEffect = true,
+  linkEffects = true,
   catalog,
   library,
   rgbw,
@@ -31,6 +34,11 @@ export function LayerStack({
   room?: number;
   /** Offer "Save as a layered effect". */
   saveAsEffect?: boolean;
+  /**
+   * Apply layered effects as links that follow later changes to the effect (true), or as copies of their
+   * layers (false: inside a layered effect, which can't link to another).
+   */
+  linkEffects?: boolean;
   catalog: Catalog | undefined;
   library: Palette[];
   rgbw: boolean;
@@ -41,6 +49,10 @@ export function LayerStack({
 }) {
   const { data: effects = [] } = useLayeredEffects();
   const saveEffect = useWriteLayeredEffect();
+  const byId = new Map(effects.map((e) => [e.id, e]));
+  /** WLED segments a layer takes: a linked effect takes one per layer. */
+  const cost = (l: Layer) => (l.effectId !== undefined ? (byId.get(l.effectId)?.layers.length ?? 1) : 1);
+  const stackCost = layers.reduce((n, l) => n + cost(l), 0);
   const canAdd = room >= 1;
   // By layer index (0 = bottom).
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
@@ -77,8 +89,10 @@ export function LayerStack({
     const effect = effects.find((e) => e.id === id);
     if (action === "blank") insertAbove(top, newLayer(rgbw));
     else if (action === "copy") insertAbove(top, structuredClone(layers[top]!));
-    else if (action === "add" && effect) update([...layers, ...structuredClone(effect.layers)], (j) => j);
-    else if (action === "replace" && effect) update(structuredClone(effect.layers), () => undefined);
+    else if (action === "add" && effect) {
+      if (linkEffects) insertAbove(top, { effectId: effect.id });
+      else update([...layers, ...structuredClone(effect.layers)], (j) => j);
+    } else if (action === "replace" && effect) update(linkEffects ? [{ effectId: effect.id }] : structuredClone(effect.layers), () => undefined);
     else if (action === "save") {
       saveEffect.reset();
       setNaming("");
@@ -89,7 +103,14 @@ export function LayerStack({
   const save = () => {
     const name = naming?.trim();
     if (!name) return;
-    saveEffect.mutate({ input: { name, layers } }, { onSuccess: () => setNaming(null) });
+    // An effect holds layers, not links: linked effects are saved as copies of their layers.
+    const own = resolveLayerLinks(layers, (id) => byId.get(id)?.layers).layers;
+    saveEffect.mutate({ input: { name, layers: own } }, { onSuccess: () => setNaming(null) });
+  };
+  /** Replaces the link at `k` with copies of the effect's layers, to edit them here. */
+  const unlink = (k: number, effect: LayeredEffect) => {
+    const n = effect.layers.length;
+    update([...layers.slice(0, k), ...structuredClone(effect.layers), ...layers.slice(k + 1)], (j) => (j <= k ? j : j + n - 1));
   };
 
   const allControls = (k: number) => (
@@ -109,9 +130,9 @@ export function LayerStack({
       >
         <option value="" disabled>+ Add layer…</option>
         <option value="blank" disabled={!canAdd}>Blank layer (Solid)</option>
-        <option value="copy" disabled={!canAdd}>Copy of the top layer</option>
+        <option value="copy" disabled={cost(layers[layers.length - 1]!) > room}>Copy of the top layer</option>
         {effects.length > 0 && (
-          <optgroup label="Add a layered effect on top">
+          <optgroup label={linkEffects ? "Link a layered effect on top" : "Add a layered effect's layers on top"}>
             {effects.map((e) => (
               <option key={e.id} value={`add:${e.id}`} disabled={e.layers.length > room}>
                 {e.name} ({e.layers.length} layer{e.layers.length === 1 ? "" : "s"}){e.layers.length > room ? " – no room" : ""}
@@ -120,11 +141,11 @@ export function LayerStack({
           </optgroup>
         )}
         {effects.length > 0 && (
-          <optgroup label="Replace these layers with">
+          <optgroup label={linkEffects ? "Replace these layers with a link to" : "Replace these layers with"}>
             {effects.map((e) => (
-              <option key={e.id} value={`replace:${e.id}`} disabled={e.layers.length - layers.length > room}>
+              <option key={e.id} value={`replace:${e.id}`} disabled={e.layers.length - stackCost > room}>
                 {e.name}
-                {e.layers.length - layers.length > room ? " – no room" : ""}
+                {e.layers.length - stackCost > room ? " – no room" : ""}
               </option>
             ))}
           </optgroup>
@@ -165,8 +186,8 @@ export function LayerStack({
     </span>
   );
 
-  // One layer: the editor as it always was, with a way to add more.
-  if (layers.length === 1)
+  // One layer of its own: the editor as it always was, with a way to add more.
+  if (layers.length === 1 && layers[0]!.effectId === undefined)
     return (
       <div className="space-y-3">
         <LayerEditor layer={layers[0]!} catalog={catalog} library={library} rgbw={rgbw} showAll={showAll.has(0)} bottom onChange={(l) => setLayer(0, l)} />
@@ -186,6 +207,8 @@ export function LayerStack({
         const l = layers[k]!;
         const isCollapsed = collapsed.has(k);
         const top = k === layers.length - 1;
+        const linked = l.effectId !== undefined ? byId.get(l.effectId) : undefined;
+        const isLink = l.effectId !== undefined;
         return (
           <div key={k} className="rounded-md border border-neutral-800 bg-neutral-900/40">
             <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs">
@@ -203,28 +226,77 @@ export function LayerStack({
                   Layer {k + 1}
                   {top ? " (top)" : k === 0 ? " (bottom)" : ""}
                 </span>
-                <span className="truncate text-neutral-400">{layerEffectName(l, catalog)}</span>
+                {isLink ? (
+                  <span className="truncate text-violet-300" title="Linked: follows changes to the layered effect">
+                    ⛓ {linked ? `${linked.name} · layered effect, ${linked.layers.length} layer${linked.layers.length === 1 ? "" : "s"}` : "missing layered effect"}
+                  </span>
+                ) : (
+                  <span className="truncate text-neutral-400">{layerEffectName(l, catalog)}</span>
+                )}
               </span>
               <span className="flex items-center gap-2">
                 {layerExtra?.(k)}
-                {!isCollapsed && allControls(k)}
+                {!isCollapsed && !isLink && allControls(k)}
+                {linked && (
+                  <>
+                    <Link
+                      to="/effects/$id"
+                      params={{ id: linked.id }}
+                      target="_blank"
+                      className="text-sky-400 hover:text-sky-300"
+                      title="Edit the layered effect (opens in a new tab). Every preset linked to it follows."
+                    >
+                      Edit effect
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => unlink(k, linked)}
+                      disabled={linked.layers.length - 1 > room}
+                      className="text-sky-400 hover:text-sky-300 disabled:opacity-40"
+                      title="Replace the link with copies of the effect's layers, to change them here only"
+                    >
+                      Unlink
+                    </button>
+                  </>
+                )}
                 <button type="button" className={iconButton} onClick={() => move(k, 1)} disabled={top} aria-label={`Move layer ${k + 1} up`} title="Move up (drawn later, on top)">
                   ↑
                 </button>
                 <button type="button" className={iconButton} onClick={() => move(k, -1)} disabled={k === 0} aria-label={`Move layer ${k + 1} down`} title="Move down (drawn earlier, underneath)">
                   ↓
                 </button>
-                {canAdd && (
+                {canAdd && cost(l) <= room && (
                   <button type="button" onClick={() => insertAbove(k, structuredClone(l))} className="text-sky-400 hover:text-sky-300" title="Add a copy of this layer right above it">
                     Copy
                   </button>
                 )}
-                <button type="button" onClick={() => remove(k)} className="text-red-400 hover:text-red-300">
-                  Remove
-                </button>
+                {layers.length > 1 && (
+                  <button type="button" onClick={() => remove(k)} className="text-red-400 hover:text-red-300">
+                    Remove
+                  </button>
+                )}
               </span>
             </div>
-            {!isCollapsed && (
+            {!isCollapsed && isLink && (
+              <div className="border-t border-neutral-800 px-3 py-2 text-xs text-neutral-400">
+                {linked ? (
+                  <ol className="space-y-0.5">
+                    {linked.layers
+                      .map((x, j) => (
+                        <li key={j}>
+                          <span className="text-neutral-500">{j + 1}.</span> {layerEffectName(x, catalog)}
+                          {x.bm !== undefined && x.bm > 0 && ` · ${BLEND_MODES[x.bm] ?? `mode ${x.bm}`}`}
+                          {x.bri !== undefined && x.bri < 255 && ` · ${Math.round((x.bri / 255) * 100)}%`}
+                        </li>
+                      ))
+                      .reverse()}
+                  </ol>
+                ) : (
+                  <p className="text-amber-400">This layered effect was deleted; the link adds nothing. Remove it.</p>
+                )}
+              </div>
+            )}
+            {!isCollapsed && !isLink && (
               <div className="border-t border-neutral-800 p-3">
                 <LayerEditor layer={l} catalog={catalog} library={library} rgbw={rgbw} showAll={showAll.has(k)} bottom={k === 0} onChange={(x) => setLayer(k, x)} />
               </div>

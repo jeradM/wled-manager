@@ -21,6 +21,9 @@ export function simEffect(s: Segment): number | undefined {
 
 const NONE_HIDDEN: Hidden = new Set();
 
+/** How the LED details name a segment's layer, and whether the simulator hides it. */
+export type LayerInfo = (segment: number, layer: number) => { label?: string; hidden: boolean };
+
 /** The simulated strip: LEDs as circles, wrapped into rows, animated at WLED's frame rate. While paused, clicking an LED explains its color. */
 export function LedCanvas({
   state,
@@ -29,6 +32,7 @@ export function LedCanvas({
   paused,
   whiteLeds,
   hidden = NONE_HIDDEN,
+  layerInfo,
 }: {
   state: PresetState;
   count: number;
@@ -37,6 +41,8 @@ export function LedCanvas({
   whiteLeds: boolean;
   /** Segments and layers turned off in the simulator only. */
   hidden?: Hidden;
+  /** How the LED details name segment i's layer j, and whether it's hidden; by default from `hidden` and the layer's number. */
+  layerInfo?: LayerInfo;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -160,7 +166,10 @@ export function LedCanvas({
             layers={expanded}
             palettes={palettes}
             whiteLeds={whiteLeds}
-            hidden={hidden}
+            layerInfo={
+              layerInfo ??
+              ((i, k) => ({ label: state.seg[i]?.layers?.length ? `Layer ${k + 1}` : undefined, hidden: isHidden(hidden, i, k) }))
+            }
             onClose={() => setPicked(null)}
           />
         </div>
@@ -190,7 +199,7 @@ function LedDetails({
   layers,
   palettes,
   whiteLeds,
-  hidden,
+  layerInfo,
   onClose,
 }: {
   trace: LedTrace;
@@ -199,7 +208,7 @@ function LedDetails({
   layers: { seg: Segment[]; origin: LayerOrigin[] };
   palettes: Palette[];
   whiteLeds: boolean;
-  hidden: Hidden;
+  layerInfo: LayerInfo;
   onClose: () => void;
 }) {
   const paletteName = (s: Segment) => {
@@ -234,19 +243,20 @@ function LedDetails({
           const seg = layers.seg[layer.segment]!;
           const { segment: i, layer: k } = layers.origin[layer.segment]!;
           const parent = state.seg[i]!;
+          const info = layerInfo(i, k);
           const pct = Math.round(((seg.bri ?? 255) / 255) * 100);
           return (
             <li key={n} className="rounded-md border border-neutral-800 p-2">
               <div className="mb-1 font-medium text-neutral-200">
                 {segmentName(parent, i)}
-                {parent.layers?.length ? ` · Layer ${k + 1}` : ""}
+                {info.label ? ` · ${info.label}` : ""}
                 <span className="font-normal text-neutral-400">
                   {" "}
                   · {effectName(seg)} · {paletteName(seg)}
                 </span>
               </div>
               {layer.status === "off" && (
-                <p className="text-neutral-500">Off{isHidden(hidden, i, k) ? " (hidden in the simulator)" : ""}, so it adds nothing.</p>
+                <p className="text-neutral-500">Off{info.hidden ? " (hidden in the simulator)" : ""}, so it adds nothing.</p>
               )}
               {layer.status === "gap" && (
                 <p className="text-neutral-500">This LED is in the segment's spacing gap, so the segment leaves it alone.</p>
@@ -260,7 +270,7 @@ function LedDetails({
                     <span className="text-neutral-200">{BLEND_MODES[w.mode] ?? `Mode ${w.mode}`}</span>
                     <Chip color={w.below} whiteLeds={whiteLeds} label="Below" />
                     <span>with</span>
-                    <Chip color={w.color} whiteLeds={whiteLeds} label={parent.layers?.length ? "This layer" : "This segment"} />
+                    <Chip color={w.color} whiteLeds={whiteLeds} label={info.label ? "This layer" : "This segment"} />
                     <span>→</span>
                     <Chip color={w.blended} whiteLeds={whiteLeds} label="Blended" />
                   </div>

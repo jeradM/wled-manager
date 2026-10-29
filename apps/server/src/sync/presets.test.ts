@@ -82,6 +82,29 @@ describe("preset sync", () => {
     expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
   });
 
+  it("follows linked layered effects, and keeps their layers when the effect is deleted", async () => {
+    const c = await setup();
+    const effect = await post<{ id: string }>("/api/effects", { name: "Glow", layers: [{ fx: 0 }, { fx: 99, fxName: "Breathe", bm: 6 }] });
+    const preset = await post<Preset>("/api/presets", statePreset(6, "Linked", [{ id: 0, start: 0, stop: 30, effectId: effect.id }]));
+    await post(`/api/controllers/${c.id}/sync`, {});
+    expect(devicePresets()["6"].seg).toEqual([
+      { id: 0, start: 0, stop: 30, fx: 0 },
+      { id: 1, start: 0, stop: 30, fx: 2, bm: 6 },
+    ]);
+
+    // Editing the effect changes the preset on the controller.
+    await t.app.inject({ method: "PUT", url: `/api/effects/${effect.id}`, payload: { name: "Glow", layers: [{ fx: 1 }] } });
+    const plan = await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`);
+    expect(plan.presets.find((p) => p.slot === 6)?.action).toBe("update");
+    await post(`/api/controllers/${c.id}/sync`, {});
+    expect(devicePresets()["6"].seg).toEqual([{ id: 0, start: 0, stop: 30, fx: 1 }]);
+
+    // Deleting it leaves a copy in the preset: nothing changes on the controller.
+    await t.app.inject({ method: "DELETE", url: `/api/effects/${effect.id}` });
+    expect((await get<Preset>(`/api/presets/${preset.id}`)).state!.seg).toEqual([{ id: 0, start: 0, stop: 30, fx: 1 }]);
+    expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
+  });
+
   it("removes device presets the library doesn't have, flagging ones it didn't write", async () => {
     const c = await setup();
     mock.files.set("/presets.json", JSON.stringify({ "0": {}, "5": { n: "Theirs", bri: 1 } }));

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canonicalJson, importPreset, isStatePreset, presetPaletteIds, renderPreset } from "./presets.js";
 import { presetState } from "./schemas.js";
-import { expandLayers, keepPadding, segmentLayers, withLayers } from "./layers.js";
+import { expandLayers, inlineEffect, keepPadding, segmentLayers, wledSegmentCount, withLayers } from "./layers.js";
 
 const effects = ["Solid", "Blink", "Breathe"];
 
@@ -269,5 +269,42 @@ describe("layers", () => {
     const seg = Array.from({ length: 16 }, () => ({ fx: 0, layers: [{ fx: 1 }] }));
     expect(presetState.safeParse({ seg }).success).toBe(true);
     expect(presetState.safeParse({ seg: [...seg, { fx: 0 }] }).success).toBe(false);
+  });
+});
+
+describe("links to layered effects", () => {
+  const glow = [{ fx: 0, col: [[255, 0, 0]] as [number, number, number][] }, { fx: 2, fxName: "Breathe", bm: 6 }];
+  const effect = (id: string) => (id === "glow" ? glow : undefined);
+  const preset = (seg: Record<string, unknown>[]) => ({ slot: 1, name: "Linked", kind: "state" as const, state: { seg } });
+
+  it("renders a linked effect's current layers", () => {
+    const p = preset([{ id: 0, start: 0, stop: 10, effectId: "glow", layers: [{ fx: 1, bm: 1 }] }]);
+    const { json, warnings } = renderPreset(p, { effects, devicePalette: () => undefined, effect });
+    expect(warnings).toEqual([]);
+    expect(json.seg).toEqual([
+      { id: 0, start: 0, stop: 10, fx: 0, col: [[255, 0, 0]] },
+      { id: 1, start: 0, stop: 10, fx: 2, bm: 6 },
+      { id: 2, start: 0, stop: 10, fx: 1, bm: 1 },
+    ]);
+  });
+
+  it("leaves out a missing effect's layers with a warning", () => {
+    const p = preset([{ id: 0, start: 0, stop: 10, fx: 0, layers: [{ effectId: "gone" }] }]);
+    const { json, warnings } = renderPreset(p, { effects, devicePalette: () => undefined, effect, effectName: () => "Old" });
+    expect(json.seg).toEqual([{ id: 0, start: 0, stop: 10, fx: 0 }]);
+    expect(warnings).toEqual([`layered effect "Old" no longer exists; its layers are left out`]);
+  });
+
+  it("counts a link as the effect's layers", () => {
+    expect(wledSegmentCount([{ fx: 0, layers: [{ effectId: "glow" }] }, { stop: 0 }], effect)).toBe(4);
+    expect(wledSegmentCount([{ effectId: "glow" }])).toBe(1);
+  });
+
+  it("turns links to a deleted effect into copies, leaving other links alone", () => {
+    const seg = [{ id: 0, effectId: "glow", layers: [{ effectId: "other" }] }, { id: 1, stop: 0 }];
+    expect(inlineEffect(seg, "glow", glow)).toEqual([
+      { id: 0, fx: 0, col: [[255, 0, 0]], layers: [{ fx: 2, fxName: "Breathe", bm: 6 }, { effectId: "other" }] },
+      { id: 1, stop: 0 },
+    ]);
   });
 });

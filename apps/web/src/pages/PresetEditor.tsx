@@ -28,6 +28,7 @@ import {
   useCatalog,
   useControllers,
   useDeletePreset,
+  useLayeredEffects,
   usePalettes,
   usePreset,
   usePresets,
@@ -57,6 +58,9 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
   const { data: existing, error: loadError } = usePreset(id);
   const { data: allPresets = [], isSuccess: presetsLoaded } = usePresets();
   const { data: palettes = [] } = usePalettes();
+  const { data: layeredEffects = [] } = useLayeredEffects();
+  /** Layers of a layered effect, for segments linked to one. */
+  const effectLayers = (id: string) => layeredEffects.find((e) => e.id === id)?.layers;
   const { data: controllers = [] } = useControllers();
   const save = useSavePreset(id);
   const del = useDeletePreset();
@@ -111,7 +115,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
   const groupIndexOf = (i: number) => groups.findIndex((g) => g.members.includes(i));
   const wledSets = groupSets(segments, groups);
   // Layers come and go here; a preset padded with clear markers keeps its WLED length.
-  const setSegment = (i: number, next: Segment) => setState({ seg: keepPadding(segments, segments.map((x, j) => (j === i ? next : x))) });
+  const setSegment = (i: number, next: Segment) => setState({ seg: keepPadding(segments, segments.map((x, j) => (j === i ? next : x)), effectLayers) });
   // Array position is the segment ID when no "id" is given, so keep positions stable: with clear markers
   // present, removing a segment turns it into a marker and adding one takes the first marker's place.
   const removeSegment = (i: number) =>
@@ -125,7 +129,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
     });
   const copySegment = (i: number) => {
     const copied = duplicateSegment(draft.state!, groups, i);
-    setDraft({ ...draft, state: { ...copied.state, seg: keepPadding(segments, copied.state.seg) }, groups: copied.groups });
+    setDraft({ ...draft, state: { ...copied.state, seg: keepPadding(segments, copied.state.seg, effectLayers) }, groups: copied.groups });
   };
   const move = (from: number, to: number) => {
     const moved = moveSegment(draft.state!, groups, from, to);
@@ -263,7 +267,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
   );
   const realCount = segments.length - markers;
   /** WLED segments the preset's segments render to, one per layer. */
-  const used = wledSegmentCount(segments.filter((s) => !isClearMarker(s)));
+  const used = wledSegmentCount(segments.filter((s) => !isClearMarker(s)), effectLayers);
   const toggleClearOthers = (on: boolean) => {
     const next = setClearOthers(draft.state!, groups, on, Math.max(maxSegments, used));
     setDraft({ ...draft, state: next.state, groups: next.groups });
@@ -323,7 +327,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
           }
           onChange={(next) => setSegment(i, next)}
           onRemove={() => removeSegment(i)}
-          onCopy={used + wledSegmentCount([s]) <= maxSegments ? () => copySegment(i) : undefined}
+          onCopy={used + wledSegmentCount([s], effectLayers) <= maxSegments ? () => copySegment(i) : undefined}
           layerRoom={maxSegments - used}
           leading={
             <span className="flex items-center">
@@ -570,7 +574,7 @@ function PresetEditor({ id, folder }: { id?: string; folder?: string }) {
                             markers={[]}
                             layerRoom={Math.floor((maxSegments - used) / membersOf(k).length)}
                             onChange={(next) =>
-                              setState({ seg: keepPadding(segments, applyGroupEdit(segments, membersOf(k), segments[membersOf(k)[0]!]!, next)) })
+                              setState({ seg: keepPadding(segments, applyGroupEdit(segments, membersOf(k), segments[membersOf(k)[0]!]!, next), effectLayers) })
                             }
                           />
                         )

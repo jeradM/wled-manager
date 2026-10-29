@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { asc, eq, sql } from "drizzle-orm";
-import type { LayeredEffect, LayeredEffectInput } from "@wled-manager/shared";
+import { inlineEffect, type LayeredEffect, type LayeredEffectInput } from "@wled-manager/shared";
 import type { Db } from "../db/index.js";
-import { layeredEffects } from "../db/schema.js";
+import { layeredEffects, presets } from "../db/schema.js";
 import type { EventBus } from "../events.js";
 import { NotFoundError } from "./controllers.js";
 
@@ -55,9 +55,24 @@ export class LayeredEffectService {
     return toEffect(row);
   }
 
+  /** Deletes the effect. Presets linked to it keep copies of its layers, so they still look the same. */
   remove(id: string) {
-    this.get(id);
-    this.db.delete(layeredEffects).where(eq(layeredEffects.id, id)).run();
+    const effect = this.get(id);
+    let presetsChanged = false;
+    this.db.transaction((tx) => {
+      for (const row of tx.select().from(presets).all()) {
+        if (!row.state) continue;
+        const seg = inlineEffect(row.state.seg, id, effect.layers);
+        if (JSON.stringify(seg) === JSON.stringify(row.state.seg)) continue;
+        tx.update(presets)
+          .set({ state: { ...row.state, seg }, revision: sql`${presets.revision} + 1`, updatedAt: new Date().toISOString() })
+          .where(eq(presets.id, row.id))
+          .run();
+        presetsChanged = true;
+      }
+      tx.delete(layeredEffects).where(eq(layeredEffects.id, id)).run();
+    });
     this.events.publish({ type: "effects.changed" });
+    if (presetsChanged) this.events.publish({ type: "presets.changed" });
   }
 }

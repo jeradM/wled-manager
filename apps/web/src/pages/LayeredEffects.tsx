@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { canonicalJson, withLayers, type Layer, type LayeredEffect, type Palette, type PresetState } from "@wled-manager/shared";
-import { useDeleteLayeredEffect, useLayeredEffect, useLayeredEffects, usePalettes, useWriteLayeredEffect } from "../queries";
+import { canonicalJson, segmentLayers, withLayers, type Layer, type LayeredEffect, type Palette, type Preset, type PresetState } from "@wled-manager/shared";
+import { useDeleteLayeredEffect, useLayeredEffect, useLayeredEffects, usePalettes, usePresets, useWriteLayeredEffect } from "../queries";
 import { LayerStack, newLayer } from "../components/preset/LayerStack";
 import { layerEffectName } from "../components/preset/LayerEditor";
 import { CATALOG, LedCanvas } from "../components/sim/LedCanvas";
@@ -23,6 +23,12 @@ const previewState = (layers: Layer[], count: number, bri = 128): PresetState =>
 
 const usesWhite = (layers: Layer[]) => layers.some((l) => l.col?.some((c) => Array.isArray(c) && c.length === 4));
 
+/** Presets with a segment linked to the effect. */
+const linkedPresets = (presets: Preset[], effectId: string) =>
+  presets.filter((p) => p.state?.seg.some((s) => segmentLayers(s).some((l) => l.effectId === effectId)));
+
+const linkedText = (n: number) => (n ? `linked from ${n} preset${n === 1 ? "" : "s"}` : "not linked from any preset");
+
 /** "Twinkle over Breathe over Solid": the layers top first. */
 const describeLayers = (layers: Layer[]) =>
   layers
@@ -33,6 +39,7 @@ const describeLayers = (layers: Layer[]) =>
 export function LayeredEffects() {
   const { data: effects = [], isLoading } = useLayeredEffects();
   const { data: palettes = [] } = usePalettes();
+  const { data: presets = [] } = usePresets();
   return (
     <div>
       <PageHeader
@@ -53,7 +60,7 @@ export function LayeredEffects() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {effects.map((e) => (
-            <EffectCard key={e.id} effect={e} palettes={palettes} />
+            <EffectCard key={e.id} effect={e} palettes={palettes} linked={linkedPresets(presets, e.id).length} />
           ))}
         </div>
       )}
@@ -61,7 +68,7 @@ export function LayeredEffects() {
   );
 }
 
-function EffectCard({ effect: e, palettes }: { effect: LayeredEffect; palettes: Palette[] }) {
+function EffectCard({ effect: e, palettes, linked }: { effect: LayeredEffect; palettes: Palette[]; linked: number }) {
   const state = useMemo(() => previewState(e.layers, 30, 160), [e.layers]);
   return (
     <Link to="/effects/$id" params={{ id: e.id }}>
@@ -74,6 +81,7 @@ function EffectCard({ effect: e, palettes }: { effect: LayeredEffect; palettes: 
           </span>
         </div>
         <p className="mt-1 truncate text-xs text-neutral-400">{describeLayers(e.layers)}</p>
+        <p className="mt-0.5 text-xs text-neutral-500">{linkedText(linked)}</p>
       </Card>
     </Link>
   );
@@ -91,6 +99,7 @@ export function EditLayeredEffect() {
 function LayeredEffectEditor({ id }: { id?: string }) {
   const { data: existing, error: loadError } = useLayeredEffect(id);
   const { data: palettes = [] } = usePalettes();
+  const { data: presets = [] } = usePresets();
   const write = useWriteLayeredEffect();
   const del = useDeleteLayeredEffect();
   const navigate = useNavigate();
@@ -135,7 +144,7 @@ function LayeredEffectEditor({ id }: { id?: string }) {
       },
     );
   const remove = () => {
-    if (!id || !confirm(`Delete "${existing?.name}"? Presets that used it keep their layers.`)) return;
+    if (!id || !confirm(`Delete "${existing?.name}"? Presets linked to it keep a copy of its layers, so they still look the same.`)) return;
     del.mutate(id, { onSuccess: () => void navigate({ to: "/effects" }) });
   };
 
@@ -163,9 +172,15 @@ function LayeredEffectEditor({ id }: { id?: string }) {
         <div className="max-w-md">
           <Input label="Name" value={name} maxLength={64} autoFocus={!id} onChange={(e) => setName(e.target.value)} />
         </div>
+        {id && (
+          <p className="mt-2 text-xs text-neutral-400">
+            {linkedText(linkedPresets(presets, id).length)}
+            {linkedPresets(presets, id).length > 0 && `: ${linkedPresets(presets, id).map((p) => p.name).join(", ")}`}
+          </p>
+        )}
         <p className="mt-2 text-xs text-neutral-500">
-          Apply it to a segment from the segment's "+ Add layer…" menu in a preset or the simulator. Applying copies the layers, so later
-          changes here don't change presets that already use it.
+          Link it to a segment from the segment's "+ Add layer…" menu in a preset or the simulator. Linked segments follow changes made
+          here, and controllers pick them up at the next sync.
         </p>
       </Card>
 
@@ -202,6 +217,7 @@ function LayeredEffectEditor({ id }: { id?: string }) {
           onChange={setLayers}
           room={32 - layers.length}
           saveAsEffect={false}
+          linkEffects={false}
           catalog={CATALOG}
           library={palettes}
           rgbw={rgbw}

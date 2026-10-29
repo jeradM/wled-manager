@@ -77,6 +77,11 @@ const layerFields = {
   spc: z.number().int().min(0).max(255).optional(),
   /** Offset: shifts the effect along the segment. */
   of: z.number().int().min(0).max(65535).optional(),
+  /**
+   * A link to a layered effect (manager only): the layer stands for all of the effect's layers, as they are
+   * when the preset is rendered, so presets follow changes to the effect. Its other fields are ignored.
+   */
+  effectId: z.string().min(1).optional(),
 };
 
 /**

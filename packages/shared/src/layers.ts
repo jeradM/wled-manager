@@ -27,8 +27,86 @@ export function withLayers(s: Segment, layers: Layer[]): Segment {
   return { ...placementOf(s), ...look(bottom), ...(rest.length ? { layers: rest.map(look) } : {}) };
 }
 
-/** WLED segments the segments render to: one per layer (a clear marker is one). */
-export const wledSegmentCount = (seg: Segment[]) => seg.reduce((n, s) => n + 1 + (s.layers?.length ?? 0), 0);
+/** The layers of a layered effect by its ID, or undefined when there's no such effect. */
+export type EffectLookup = (effectId: string) => Layer[] | undefined;
+
+const isMarkerSegment = (s: Segment) => s.stop === 0 && Object.keys(s).every((k) => k === "stop" || k === "id");
+
+/**
+ * WLED segments the segments render to: one per layer (a clear marker is one), a link to a layered effect
+ * counting as the effect's layers (one if it can't be looked up).
+ */
+export const wledSegmentCount = (seg: Segment[], lookup?: EffectLookup) =>
+  seg.reduce(
+    (n, s) =>
+      n + (isMarkerSegment(s) ? 1 : segmentLayers(s).reduce((m, l) => m + (l.effectId !== undefined ? (lookup?.(l.effectId)?.length ?? 1) : 1), 0)),
+    0,
+  );
+
+/** Whether any segment links to a layered effect. */
+export const hasEffectLinks = (seg: Segment[]) => seg.some((s) => !isMarkerSegment(s) && segmentLayers(s).some((l) => l.effectId !== undefined));
+
+/** Where a layer of a resolved stack came from: its place in the segment's own stack, and the linked effect's layer if any. */
+export interface LayerSource {
+  layer: number;
+  effectId?: string;
+  effectLayer?: number;
+}
+
+/** A stack with every link to a layered effect replaced by copies of the effect's layers. */
+export function resolveLayerLinks(layers: Layer[], lookup: EffectLookup): { layers: Layer[]; sources: LayerSource[]; missing: string[] } {
+  const out: Layer[] = [];
+  const sources: LayerSource[] = [];
+  const missing: string[] = [];
+  layers.forEach((l, k) => {
+    if (l.effectId === undefined) {
+      out.push(l);
+      sources.push({ layer: k });
+      return;
+    }
+    const linked = lookup(l.effectId);
+    if (!linked) {
+      missing.push(l.effectId);
+      return;
+    }
+    linked.forEach((x, j) => {
+      // Effects don't nest: a link inside an effect is dropped.
+      const { effectId: _, ...copy } = structuredClone(x);
+      out.push(copy);
+      sources.push({ layer: k, effectId: l.effectId, effectLayer: j });
+    });
+  });
+  return { layers: out, sources, missing };
+}
+
+/**
+ * Segments with links to layered effects replaced by the effects' layers. `sources[i]` says where each of
+ * segment i's resolved layers came from; `missing` lists links to effects the lookup doesn't know.
+ */
+export function resolveEffectLinks(seg: Segment[], lookup: EffectLookup): { seg: Segment[]; sources: LayerSource[][]; missing: string[] } {
+  const missing: string[] = [];
+  const sources: LayerSource[][] = [];
+  const out = seg.map((s) => {
+    const layers = segmentLayers(s);
+    if (isMarkerSegment(s) || !layers.some((l) => l.effectId !== undefined)) {
+      sources.push(layers.map((_, k) => ({ layer: k })));
+      return s;
+    }
+    const r = resolveLayerLinks(layers, lookup);
+    missing.push(...r.missing);
+    sources.push(r.sources);
+    return withLayers(s, r.layers);
+  });
+  return { seg: out, sources, missing };
+}
+
+/** Segments with their links to one layered effect turned into copies of its layers (when it's deleted). */
+export const inlineEffect = (seg: Segment[], effectId: string, layers: Layer[]): Segment[] =>
+  seg.map((s) => {
+    const own = segmentLayers(s);
+    if (isMarkerSegment(s) || !own.some((l) => l.effectId === effectId)) return s;
+    return withLayers(s, own.flatMap((l) => (l.effectId === effectId ? structuredClone(layers) : [l])));
+  });
 
 /** Where a WLED segment came from: the preset segment's position and the layer (0 = bottom). */
 export interface LayerOrigin {
@@ -65,9 +143,9 @@ const isMarker = (s: Segment) => s.stop === 0 && Object.keys(s).every((k) => k =
  * added or removed, so a preset padded to turn other segments off keeps rendering to the same number of WLED
  * segments. Presets without clear markers are left alone.
  */
-export function keepPadding(before: Segment[], after: Segment[]): Segment[] {
+export function keepPadding(before: Segment[], after: Segment[], lookup?: EffectLookup): Segment[] {
   if (!before.some(isMarker)) return after;
-  let diff = wledSegmentCount(after) - wledSegmentCount(before);
+  let diff = wledSegmentCount(after, lookup) - wledSegmentCount(before, lookup);
   const out = [...after];
   while (diff > 0 && out.length && isMarker(out[out.length - 1]!)) {
     out.pop();

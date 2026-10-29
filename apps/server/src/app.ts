@@ -64,13 +64,14 @@ export async function buildApp({ db, webDist, logger = true, pollIntervalMs = 0,
   controllers.upgradeSegmentDefinitions();
   const palettes = new PaletteService(db, events);
   const presets = new PresetService(db, events);
+  const effects = new LayeredEffectService(db, events);
   const locks = new ControllerLocks();
   app.decorate("controllers", controllers);
   app.decorate("palettes", palettes);
   app.decorate("presets", presets);
-  app.decorate("effects", new LayeredEffectService(db, events));
+  app.decorate("effects", effects);
   app.decorate("paletteTools", new PaletteTools(controllers));
-  app.decorate("sync", new SyncService(db, events, locks, controllers, palettes, presets));
+  app.decorate("sync", new SyncService(db, events, locks, controllers, palettes, presets, effects));
   app.decorate("imports", new ImportService(db, events, locks, controllers, palettes, presets));
   const locator = new LocatorService(controllers, app.log);
   app.decorate("locator", locator);
