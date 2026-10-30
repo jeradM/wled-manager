@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { layoutStrips, type LayerOrigin, type Layout, type LayoutStrip, type Palette, type PresetState, type Segment } from "@wled-manager/shared";
 import { Simulator as Sim, ledCss } from "@wled-manager/shared/sim";
 import { layoutImageUrl } from "../../queries";
+import { ZoomControls, useZoomPan } from "../layout/zoom";
 import { LedDetails, applyToSim, usePalette16s, type LayerInfo } from "./LedCanvas";
 
 const stripKey = (s: Pick<LayoutStrip, "controllerId">) => s.controllerId ?? "";
@@ -9,7 +10,8 @@ const stripKey = (s: Pick<LayoutStrip, "controllerId">) => s.controllerId ?? "";
 /**
  * Simulated lights where they really are: a layout's picture with each line's lights on it. Every controller
  * on the layout runs its own simulator, as the real controllers would, with the state `stateFor` gives it.
- * While paused, clicking a light explains its color.
+ * While paused, clicking a light explains its color. The picture zooms (pinch, Ctrl/⌘ + scroll, the buttons,
+ * or + / − / 0) and pans (drag, or scroll once zoomed in); lights keep their size on screen.
  */
 export function LayoutView({
   layout,
@@ -59,7 +61,7 @@ export function LayoutView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [strips, stateFor, resolved]);
 
-  const [picked, setPicked] = useState<{ strip: string; led: number; x: number; y: number } | null>(null);
+  const [picked, setPicked] = useState<{ strip: string; led: number } | null>(null);
   useEffect(() => {
     for (const s of strips) simFor(s).setPaused(paused);
     if (!paused) setPicked(null);
@@ -85,6 +87,12 @@ export function LayoutView({
   const width = Math.max(0, Math.min(available, Math.floor((windowHeight * maxHeight) / aspect)));
   const height = Math.round(width * aspect);
   const radius = layout.ledSize / 2;
+  const boxRef = useRef<HTMLDivElement>(null);
+  const zoom = useZoomPan(boxRef, { w: width, h: height, bw: width, bh: height }, true);
+  const { view, cw, ch } = zoom;
+  // The drawing loop reads the view from here, so panning doesn't restart it.
+  const viewRef = useRef({ ...view, cw, ch });
+  viewRef.current = { ...view, cw, ch };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -97,6 +105,7 @@ export function LayoutView({
     let raf = 0;
     const draw = (now: number) => {
       ctx.clearRect(0, 0, width, height);
+      const v = viewRef.current;
       for (const s of strips) {
         const px = simFor(s).frame(now);
         const state = ran.current.get(stripKey(s))?.state;
@@ -104,8 +113,9 @@ export function LayoutView({
         const bri = state?.bri ?? 128;
         for (const light of s.lights) {
           const c = on ? (px[light.led] ?? 0) : 0;
-          const x = light.x * width;
-          const y = light.y * height;
+          const x = v.ox + light.x * v.cw;
+          const y = v.oy + light.y * v.ch;
+          if (x < -radius || y < -radius || x > width + radius || y > height + radius) continue;
           ctx.beginPath();
           ctx.arc(x, y, radius, 0, Math.PI * 2);
           if (c) {
@@ -132,7 +142,7 @@ export function LayoutView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [strips, width, height, radius, whiteLeds, picked]);
 
-  const pick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const pick = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!paused) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -140,10 +150,16 @@ export function LayoutView({
     let best: { strip: string; led: number; d: number } | null = null;
     for (const s of strips)
       for (const l of s.lights) {
-        const d = Math.hypot(l.x * width - x, l.y * height - y);
+        const d = Math.hypot(view.ox + l.x * cw - x, view.oy + l.y * ch - y);
         if (d <= Math.max(radius, 6) + 2 && (!best || d < best.d)) best = { strip: stripKey(s), led: l.led, d };
       }
-    setPicked(best && !(picked?.strip === best.strip && picked.led === best.led) ? { strip: best.strip, led: best.led, x, y } : null);
+    setPicked(best && !(picked?.strip === best.strip && picked.led === best.led) ? { strip: best.strip, led: best.led } : null);
+  };
+  // The details sit under the picked light, following it as the picture moves.
+  const pickedLight = picked && strips.find((s) => stripKey(s) === picked.strip)?.lights.find((l) => l.led === picked.led);
+  const pickedAt = pickedLight && {
+    x: Math.max(0, Math.min(width, view.ox + pickedLight.x * cw)),
+    y: Math.max(0, Math.min(height, view.oy + pickedLight.y * ch)),
   };
 
   const pickedSim = picked ? sims.current.get(picked.strip) : undefined;
@@ -154,22 +170,32 @@ export function LayoutView({
   return (
     <div ref={wrapRef} className="w-full">
       <div className="relative mx-auto" style={{ width }}>
-        <div className="relative overflow-hidden rounded-md bg-neutral-950" style={{ height }}>
+        <div ref={boxRef} className="relative overflow-hidden rounded-md bg-neutral-950 select-none" style={{ height }}>
           {layout.image && (
-            <img src={layoutImageUrl(layout)} alt="" className="absolute inset-0 size-full object-fill brightness-[0.45]" draggable={false} />
+            <img
+              src={layoutImageUrl(layout)}
+              alt=""
+              className="absolute max-w-none object-fill brightness-[0.45]"
+              style={{ left: view.ox, top: view.oy, width: cw, height: ch }}
+              draggable={false}
+            />
           )}
           <canvas
             ref={canvasRef}
-            onClick={pick}
+            onPointerDown={(e) => (e.button === 0 || e.button === 1) && zoom.startPan(e)}
+            onPointerMove={zoom.movePan}
+            onPointerUp={(e) => zoom.endPan() === "click" && e.button === 0 && pick(e)}
+            onAuxClick={(e) => e.preventDefault()}
             style={{ width: "100%", height }}
-            className={`absolute inset-0 ${paused ? "cursor-pointer" : ""}`}
+            className={`absolute inset-0 ${zoom.panning ? "cursor-grabbing" : view.z > 1 ? "cursor-grab" : paused ? "cursor-pointer" : ""}`}
             title={paused ? "Click a light to see how its color is made" : undefined}
           />
+          <ZoomControls zoom={zoom} title="Zoom: pinch, Ctrl/⌘ + scroll, or + / − / 0. Pan: drag, or scroll once zoomed in." />
         </div>
         {strips.length === 0 && <p className="mt-1 text-xs text-neutral-500">This layout has no lights yet. Draw some in the layout designer.</p>}
         {paused && !picked && strips.length > 0 && <p className="mt-1 text-xs text-neutral-500">Paused. Click a light to see how its color is made.</p>}
-        {picked && trace && pickedRan && (
-          <div className="absolute z-40 mt-1" style={{ top: picked.y + 12, left: Math.max(0, Math.min(picked.x - 24, width - 384)) }}>
+        {picked && trace && pickedRan && pickedAt && (
+          <div className="absolute z-40 mt-1" style={{ top: pickedAt.y + 12, left: Math.max(0, Math.min(pickedAt.x - 24, width - 384)) }}>
             <LedDetails
               trace={trace}
               state={pickedRan.state}

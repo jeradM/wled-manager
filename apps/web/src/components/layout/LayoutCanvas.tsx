@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { lineFirstLeds, linePoints, type LayoutLine, type LayoutPoint } from "@wled-manager/shared";
+import { ZoomControls, typing, useZoomPan, type Geo } from "./zoom";
 
 /** Colors telling controllers apart on a layout; lines on no controller are gray. */
 const CONTROLLER_COLORS = ["#38bdf8", "#f472b6", "#a3e635", "#fbbf24", "#c084fc", "#2dd4bf", "#fb923c", "#f87171"];
@@ -28,6 +29,10 @@ type Drag = { id: string; part: "from" | "to" | "line"; start: LayoutPoint; line
  * A layout's picture with its lines drawn over it. With the draw tool, two clicks add a line (first light,
  * then last); with the select tool, lines can be picked and their ends or the whole line dragged. Shift
  * snaps to 45° steps. Without a tool it only shows the layout.
+ *
+ * With a tool, the picture can be zoomed (pinch, Ctrl/⌘ + scroll, the buttons, or + / − / 0) and panned
+ * (scroll, drag empty space with the select tool, or hold Space or the middle button and drag). Lights and
+ * handles keep their size on screen, so zooming in spreads dense runs apart.
  */
 export function LayoutCanvas({
   lines,
@@ -51,53 +56,86 @@ export function LayoutCanvas({
   selected?: string | null;
   onSelect?: (id: string | null) => void;
   onChange?: (lines: LayoutLine[]) => void;
-  /** A line drawn from its first light to its last; `pixels` is its length on screen. */
+  /** A line drawn from its first light to its last; `pixels` is its length with the whole picture in view. */
   onDraw?: (from: LayoutPoint, to: LayoutPoint, pixels: number) => void;
 }) {
+  const zoomable = !!tool;
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const height = Math.round(width * aspect);
+  const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
+  // Editing, the view stays on screen and the picture zooms within it; otherwise it's the picture's shape.
+  const height = zoomable ? Math.min(Math.round(width * aspect), Math.round(windowHeight * 0.75)) : Math.round(width * aspect);
+  const bw = Math.min(width, height / aspect);
+  const geo: Geo = { w: width, h: height, bw, bh: bw * aspect };
+  const zoom = useZoomPan(wrapRef, geo, zoomable);
+  const { view, cw, ch } = zoom;
+
   const [pending, setPending] = useState<LayoutPoint | null>(null);
   const [hover, setHover] = useState<LayoutPoint | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [space, setSpace] = useState(false);
+  const over = useRef(false);
 
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([e]) => setWidth(Math.floor(e!.contentRect.width)));
     ro.observe(el);
-    return () => ro.disconnect();
+    const resize = () => setWindowHeight(window.innerHeight);
+    window.addEventListener("resize", resize);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", resize);
+    };
   }, []);
 
   useEffect(() => {
     if (tool !== "draw") setPending(null);
   }, [tool]);
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setPending(null);
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, []);
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPending(null);
+      if (zoomable && e.key === " " && over.current && !typing(e.target)) {
+        e.preventDefault();
+        setSpace(true);
+      }
+    };
+    const up = (e: KeyboardEvent) => e.key === " " && setSpace(false);
+    const blur = () => setSpace(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomable]);
 
   const point = (e: React.PointerEvent | React.MouseEvent): LayoutPoint => {
     const r = wrapRef.current!.getBoundingClientRect();
-    return { x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) };
+    return { x: clamp((e.clientX - r.left - view.ox) / cw), y: clamp((e.clientY - r.top - view.oy) / ch) };
   };
-  const px = (p: LayoutPoint) => ({ x: p.x * width, y: p.y * height });
+  const px = (p: LayoutPoint) => ({ x: view.ox + p.x * cw, y: view.oy + p.y * ch });
   const firsts = lineFirstLeds(lines);
+  /** Pans instead of editing: the middle button, Space held, or empty space with the select tool. */
+  const pans = (e: React.PointerEvent, background: boolean) => zoomable && (e.button === 1 || space || (background && tool === "select" && e.button === 0));
 
   const onBackgroundDown = (e: React.PointerEvent) => {
-    if (tool === "select") onSelect?.(null);
-    if (tool !== "draw") return;
+    if (pans(e, true)) return zoom.startPan(e);
+    if (tool !== "draw" || e.button !== 0) return;
     let p = point(e);
     if (!pending) return setPending(p);
-    if (e.shiftKey) p = snap(pending, p, width, height);
-    const pixels = Math.hypot((p.x - pending.x) * width, (p.y - pending.y) * height);
+    if (e.shiftKey) p = snap(pending, p, cw, ch);
+    const pixels = Math.hypot((p.x - pending.x) * geo.bw, (p.y - pending.y) * geo.bh);
     setPending(null);
-    if (pixels >= 4) onDraw?.(pending, p, pixels);
+    if (pixels * view.z >= 4) onDraw?.(pending, p, pixels);
   };
   const onMove = (e: React.PointerEvent) => {
+    if (zoom.movePan(e)) return;
     const p = point(e);
-    setHover(pending && e.shiftKey ? snap(pending, p, width, height) : p);
+    setHover(pending && e.shiftKey ? snap(pending, p, cw, ch) : p);
     if (!drag) return;
     const dx = p.x - drag.start.x;
     const dy = p.y - drag.start.y;
@@ -110,13 +148,18 @@ export function LayoutCanvas({
       next = { ...l, from: { x: l.from.x + mx, y: l.from.y + my }, to: { x: l.to.x + mx, y: l.to.y + my } };
     } else {
       const other = drag.part === "from" ? l.to : l.from;
-      const moved = e.shiftKey ? snap(other, p, width, height) : p;
+      const moved = e.shiftKey ? snap(other, p, cw, ch) : p;
       next = { ...l, [drag.part]: moved };
     }
     onChange?.(lines.map((x) => (x.id === l.id ? next : x)));
   };
+  const onUp = () => {
+    // A click on empty space (not a pan) clears the selection.
+    if (zoom.endPan() === "click" && tool === "select") onSelect?.(null);
+    setDrag(null);
+  };
   const startDrag = (e: React.PointerEvent, l: LayoutLine, part: Drag["part"]) => {
-    if (tool !== "select") return;
+    if (tool !== "select" || e.button !== 0 || pans(e, false)) return; // panning: let the background have it
     e.stopPropagation();
     onSelect?.(l.id);
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
@@ -124,13 +167,18 @@ export function LayoutCanvas({
   };
 
   const r = ledSize / 2;
+  const cursor = zoom.panning ? "cursor-grabbing" : space ? "cursor-grab" : tool === "draw" ? "cursor-crosshair" : "";
   return (
-    <div
-      ref={wrapRef}
-      className={`relative w-full overflow-hidden rounded-md bg-neutral-950 select-none ${tool === "draw" ? "cursor-crosshair" : ""}`}
-      style={{ height }}
-    >
-      {imageUrl && <img src={imageUrl} alt="" className="absolute inset-0 size-full object-fill brightness-75" draggable={false} />}
+    <div ref={wrapRef} className={`relative w-full overflow-hidden rounded-md bg-neutral-950 select-none ${cursor}`} style={{ height }}>
+      {imageUrl && (
+        <img
+          src={imageUrl}
+          alt=""
+          className="absolute max-w-none object-fill brightness-75"
+          style={{ left: view.ox, top: view.oy, width: cw, height: ch }}
+          draggable={false}
+        />
+      )}
       {!imageUrl && tool && (
         <p className="absolute inset-0 flex items-center justify-center text-sm text-neutral-600">Choose a picture, or draw on the blank canvas.</p>
       )}
@@ -140,9 +188,15 @@ export function LayoutCanvas({
         className="absolute inset-0"
         onPointerDown={onBackgroundDown}
         onPointerMove={onMove}
-        onPointerUp={() => setDrag(null)}
-        onPointerLeave={() => setHover(null)}
+        onPointerUp={onUp}
+        onPointerEnter={() => (over.current = true)}
+        onPointerLeave={() => {
+          over.current = false;
+          setHover(null);
+        }}
+        onAuxClick={(e) => e.preventDefault()}
       >
+        {!imageUrl && zoomable && view.z > 1 && <rect x={view.ox} y={view.oy} width={cw} height={ch} fill="none" stroke="#404040" />}
         {lines.map((l, i) => {
           const color = colorOf(l.controllerId);
           const a = px(l.from);
@@ -181,19 +235,37 @@ export function LayoutCanvas({
                   y2={b.y}
                   stroke="transparent"
                   strokeWidth={Math.max(14, ledSize + 6)}
-                  className="cursor-move"
+                  className={space || zoom.panning ? "" : "cursor-move"}
                   onPointerDown={(e) => startDrag(e, l, "line")}
                 />
-              )}
-              {tool === "select" && isSel && (
-                <>
-                  <circle cx={a.x} cy={a.y} r={7} fill="none" stroke="white" strokeWidth={2} className="cursor-grab" onPointerDown={(e) => startDrag(e, l, "from")} />
-                  <circle cx={b.x} cy={b.y} r={7} fill="none" stroke="white" strokeWidth={2} strokeDasharray="3 2" className="cursor-grab" onPointerDown={(e) => startDrag(e, l, "to")} />
-                </>
               )}
             </g>
           );
         })}
+        {/* Line ends on top of every line, so an end can be grabbed where lines meet; the selected line's last. */}
+        {tool === "select" &&
+          [...lines.filter((l) => l.id !== selected), ...lines.filter((l) => l.id === selected)].map((l) =>
+            (["from", "to"] as const).map((part) => {
+              const q = px(l[part]);
+              const isSel = l.id === selected;
+              return (
+                <circle
+                  key={`${l.id}-${part}`}
+                  cx={q.x}
+                  cy={q.y}
+                  r={Math.max(7, r + 3)}
+                  fill="transparent"
+                  stroke="white"
+                  strokeWidth={2}
+                  strokeDasharray={part === "to" ? "3 2" : undefined}
+                  className={`${isSel ? "" : "opacity-0 hover:opacity-100"} ${space || zoom.panning ? "" : "cursor-grab"}`}
+                  onPointerDown={(e) => startDrag(e, l, part)}
+                >
+                  <title>{part === "from" ? "First light: drag to move this end" : "Last light: drag to move this end"}</title>
+                </circle>
+              );
+            }),
+          )}
         {pending && (
           <>
             <circle cx={px(pending).x} cy={px(pending).y} r={4} fill="white" />
@@ -201,6 +273,12 @@ export function LayoutCanvas({
           </>
         )}
       </svg>
+      {zoomable && (
+        <ZoomControls
+          zoom={zoom}
+          title={`Zoom: pinch, Ctrl/⌘ + scroll, or + / − / 0. Pan: scroll, ${tool === "select" ? "drag empty space, " : ""}or hold Space or the middle button and drag.`}
+        />
+      )}
     </div>
   );
 }

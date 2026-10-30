@@ -125,10 +125,18 @@ function LayoutDesigner({ id }: { id?: string }) {
     setLines(lines.filter((l) => l.id !== lineId));
     if (selected === lineId) setSelected(null);
   };
-  const moveLine = (k: number, d: -1 | 1) => {
+  /** Moves line `from` to position `to`. */
+  const moveLine = (from: number, to: number) => {
     const next = [...lines];
-    [next[k], next[k + d]] = [next[k + d]!, next[k]!];
+    next.splice(to, 0, ...next.splice(from, 1));
     setLines(next);
+  };
+  // Dragging a line in the list: where from, and the line it's over.
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+  const endDrag = () => {
+    setDragFrom(null);
+    setDragOver(null);
   };
 
   // Delete removes the selected line (unless typing in a field).
@@ -254,8 +262,8 @@ function LayoutDesigner({ id }: { id?: string }) {
               </div>
               <span className="text-xs text-neutral-500">
                 {tool === "draw"
-                  ? "Click the first light, then the last. Shift keeps the line straight (45° steps); Esc cancels."
-                  : "Click a line to edit it; drag it or its ends to move them. Delete removes it."}
+                  ? "Click the first light, then the last. Shift keeps the line straight (45° steps); Esc cancels. Pinch or Ctrl/⌘ + scroll to zoom; scroll or Space + drag to pan."
+                  : "Click a line to edit it. Drag a line to move it, or drag either end to re-aim it. Delete removes it. Pinch or Ctrl/⌘ + scroll to zoom; drag empty space to pan."}
               </span>
               <label className="ml-auto flex items-center gap-2 text-xs text-neutral-400">
                 Light size
@@ -344,10 +352,44 @@ function LayoutDesigner({ id }: { id?: string }) {
             {lines.length === 0 && <p className="text-xs text-neutral-500">None yet. Draw one on the picture.</p>}
             <ol className="space-y-1">
               {lines.map((l, k) => (
-                <li key={l.id}>
+                <li
+                  key={l.id}
+                  data-line
+                  onDragOver={(e) => {
+                    if (dragFrom === null) return;
+                    e.preventDefault();
+                    setDragOver(k);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (dragFrom !== null && dragFrom !== k) moveLine(dragFrom, k);
+                    endDrag();
+                  }}
+                  className={`rounded ${dragFrom === k ? "opacity-40" : ""} ${
+                    dragFrom !== null && dragOver === k && dragFrom !== k ? (dragFrom < k ? "shadow-[0_2px_0_0_#0ea5e9]" : "shadow-[0_-2px_0_0_#0ea5e9]") : ""
+                  }`}
+                >
                   <div
                     className={`flex items-center gap-2 rounded px-1.5 py-1 text-xs ${l.id === selected ? "bg-sky-950/60" : "hover:bg-neutral-800/60"}`}
                   >
+                    <span
+                      role="button"
+                      aria-label="Drag to reorder"
+                      title="Drag to reorder"
+                      draggable
+                      onDragStart={(e) => {
+                        setDragFrom(k);
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", String(k));
+                        // Show the whole row under the pointer, not just the handle.
+                        const row = e.currentTarget.closest("[data-line]");
+                        if (row) e.dataTransfer.setDragImage(row, 12, 10);
+                      }}
+                      onDragEnd={endDrag}
+                      className="-mx-0.5 cursor-grab text-neutral-500 select-none hover:text-neutral-200 active:cursor-grabbing"
+                    >
+                      ⠿
+                    </span>
                     <span className="inline-block size-2.5 shrink-0 rounded-full" style={{ background: colorOf(l.controllerId) }} />
                     <button
                       type="button"
@@ -363,12 +405,12 @@ function LayoutDesigner({ id }: { id?: string }) {
                         · {l.count === 0 ? "gap" : `${firsts[k]}–${firsts[k]! + l.count - 1}`}
                       </span>
                     </button>
-                    <button type="button" onClick={() => moveLine(k, -1)} disabled={k === 0} className="px-0.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30" aria-label={`Move line ${k + 1} up`}>
+                    <button type="button" onClick={() => moveLine(k, k - 1)} disabled={k === 0} className="px-0.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30" aria-label={`Move line ${k + 1} up`}>
                       ↑
                     </button>
                     <button
                       type="button"
-                      onClick={() => moveLine(k, 1)}
+                      onClick={() => moveLine(k, k + 1)}
                       disabled={k === lines.length - 1}
                       className="px-0.5 text-neutral-400 hover:text-neutral-100 disabled:opacity-30"
                       aria-label={`Move line ${k + 1} down`}
