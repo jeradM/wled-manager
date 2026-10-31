@@ -11,6 +11,23 @@ const actionStyle: Record<ChangeAction, string> = {
   unchanged: "bg-neutral-800 text-neutral-400",
 };
 
+/** How many items a sync would create, update or delete. */
+export const planChanges = (plan: SyncPlan) => [...plan.palettes, ...plan.presets].filter((c) => c.action !== "unchanged").length;
+
+/**
+ * What a sync would lose on the controller: items WLED Manager didn't write (listed) that it overwrites or
+ * removes, and how many items it deletes.
+ */
+export function syncRisks(plan: SyncPlan) {
+  return {
+    foreign: [
+      ...plan.palettes.filter((c) => c.replacesUnmanaged).map((c) => `palette ${c.path}`),
+      ...plan.presets.filter((c) => c.replacesUnmanaged).map((c) => `preset ${c.slot}: ${c.name}`),
+    ],
+    deletions: [...plan.palettes, ...plan.presets].filter((c) => c.action === "delete").length,
+  };
+}
+
 /** Shows what a sync would change on the controller and applies it on confirmation. */
 export function SyncCard({ controllerId, online }: { controllerId: string; online: boolean }) {
   const { data: plan, error, isFetching, refetch } = useSyncPlan(controllerId, online);
@@ -20,14 +37,12 @@ export function SyncCard({ controllerId, online }: { controllerId: string; onlin
   const foreignPalettes = plan?.palettes.filter((c) => c.replacesUnmanaged) ?? [];
   const foreignPresets = plan?.presets.filter((c) => c.replacesUnmanaged) ?? [];
   const foreign = [...foreignPalettes, ...foreignPresets];
-  const deletions = [...(plan?.palettes ?? []), ...(plan?.presets ?? [])].filter((c) => c.action === "delete").length;
   const apply = () => {
+    if (!plan) return;
+    const { foreign, deletions } = syncRisks(plan);
     const message = foreign.length
       ? `These items on the controller weren't written by WLED Manager (or were changed since) and will be overwritten or removed:\n` +
-        [
-          ...foreignPalettes.map((c) => `  palette ${c.path}`),
-          ...foreignPresets.map((c) => `  preset ${c.slot}: ${c.name}`),
-        ].join("\n") +
+        foreign.map((f) => `  ${f}`).join("\n") +
         "\n\nImport them first if you want to keep them. Continue?"
       : deletions
         ? `This removes ${deletions} item(s) from the controller. Continue?`

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Controller,
   ControllerExport,
@@ -53,12 +53,13 @@ export const useControllers = () =>
 export const useController = (id: string) =>
   useQuery({ queryKey: keys.controller(id), queryFn: () => api<Controller>(`/controllers/${id}`) });
 
-export const useDevicePresets = (id: string, enabled: boolean) =>
-  useQuery({
-    queryKey: keys.devicePresets(id),
-    queryFn: () => api<{ slot: number; name: string }[]>(`/controllers/${id}/device-presets`),
-    enabled,
-  });
+export type DevicePreset = { slot: number; name: string };
+const devicePresetsQuery = (id: string) => ({
+  queryKey: keys.devicePresets(id),
+  queryFn: () => api<DevicePreset[]>(`/controllers/${id}/device-presets`),
+});
+
+export const useDevicePresets = (id: string, enabled: boolean) => useQuery({ ...devicePresetsQuery(id), enabled });
 
 export interface DeviceState {
   on: boolean;
@@ -66,13 +67,20 @@ export interface DeviceState {
   ps: number;
 }
 
-export const useDeviceState = (id: string, enabled: boolean) =>
-  useQuery({
-    queryKey: keys.deviceState(id),
-    queryFn: () => api<DeviceState>(`/controllers/${id}/state`),
-    enabled,
-    refetchInterval: 10_000,
-  });
+const deviceStateQuery = (id: string) => ({
+  queryKey: keys.deviceState(id),
+  queryFn: () => api<DeviceState>(`/controllers/${id}/state`),
+  refetchInterval: 10_000,
+});
+
+export const useDeviceState = (id: string, enabled: boolean) => useQuery({ ...deviceStateQuery(id), enabled });
+
+/** Each controller's light state and presets, read from the controllers themselves. */
+export function useDevicesLive(ids: string[]) {
+  const states = useQueries({ queries: ids.map(deviceStateQuery) });
+  const presets = useQueries({ queries: ids.map(devicePresetsQuery) });
+  return ids.map((id, i) => ({ id, state: states[i]!.data, presets: presets[i]!.data, error: states[i]!.error }));
+}
 
 export function useAddController() {
   const qc = useQueryClient();
@@ -131,6 +139,25 @@ export function useRefreshController() {
   return useMutation({
     mutationFn: (id: string) => api<Controller>(`/controllers/${id}/refresh`, { method: "POST" }),
     onSuccess: (_, id) => qc.invalidateQueries({ queryKey: keys.controller(id) }),
+  });
+}
+
+/** Sends quick controls to several controllers at once; resolves to the ones that failed. */
+export function useQuickControls() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (sends: { id: string; body: QuickControl }[]) => {
+      const results = await Promise.allSettled(
+        sends.map(({ id, body }) => api<DeviceState>(`/controllers/${id}/state`, { method: "POST", body: JSON.stringify(body) })),
+      );
+      const failed: { id: string; error: unknown }[] = [];
+      results.forEach((r, i) => {
+        const { id } = sends[i]!;
+        if (r.status === "fulfilled") qc.setQueryData(keys.deviceState(id), r.value);
+        else failed.push({ id, error: r.reason });
+      });
+      return failed;
+    },
   });
 }
 
@@ -402,13 +429,24 @@ export function useImport(controllerId: string) {
 
 // ---- Sync ----
 
-export const useSyncPlan = (controllerId: string, enabled: boolean) =>
-  useQuery({
-    queryKey: keys.syncPlan(controllerId),
-    queryFn: () => api<SyncPlan>(`/controllers/${controllerId}/sync-plan`),
-    enabled,
-    staleTime: 30_000,
-  });
+const syncPlanQuery = (controllerId: string) => ({
+  queryKey: keys.syncPlan(controllerId),
+  queryFn: () => api<SyncPlan>(`/controllers/${controllerId}/sync-plan`),
+  staleTime: 30_000,
+});
+
+export const useSyncPlan = (controllerId: string, enabled: boolean) => useQuery({ ...syncPlanQuery(controllerId), enabled });
+
+/**
+ * The controllers' last sync checks, without checking any (a check reads the controller): `check` runs a
+ * fresh one and resolves to its plan.
+ */
+export function useSyncPlans(controllerIds: string[]) {
+  const qc = useQueryClient();
+  const results = useQueries({ queries: controllerIds.map((id) => ({ ...syncPlanQuery(id), enabled: false })) });
+  const check = (controllerId: string) => qc.fetchQuery({ ...syncPlanQuery(controllerId), staleTime: 0 });
+  return { results, check };
+}
 
 export function useSync() {
   const qc = useQueryClient();
