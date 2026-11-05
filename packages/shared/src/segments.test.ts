@@ -8,6 +8,7 @@ import {
   linkSegment,
   litLeds,
   presetSkipReason,
+  renameLabel,
   segmentSets,
   renumberSegments,
   moveSegment,
@@ -327,5 +328,50 @@ describe("joining a group", () => {
     const out = joinGroup(seg, groups, 0, 1);
     expect(out.groups).toEqual([{ name: "A", members: [1] }, { name: "B", members: [0, 2] }]);
     expect(out.seg[0]).toEqual({ id: 0, start: 0, stop: 10, fx: 3 });
+  });
+});
+
+describe("renameLabel", () => {
+  const set = {
+    markers: [
+      { index: 10, label: "Corner" },
+      { index: 40, label: "Door" },
+    ],
+    ranges: [{ label: "Roof", spans: [{ start: 0, stop: 10 }] }],
+    segments: [
+      { id: "a", start: "Corner", end: { type: "marker", label: "Door", includeEnd: false } },
+      { id: "b", start: 5, end: { type: "marker", label: "Corner", includeEnd: true } },
+      { id: "c", range: "Roof", span: 0, reverse: false },
+    ] as SegmentDefinition[],
+  };
+
+  it("renames a marker and the segments that start or end at it", () => {
+    const r = renameLabel(set, { marker: 10 }, " Garage corner ")!;
+    expect(r.markers[0]).toEqual({ index: 10, label: "Garage corner" });
+    expect(r.segments[0]).toMatchObject({ start: "Garage corner", end: { label: "Door" } });
+    expect(r.segments[1]).toMatchObject({ start: 5, end: { label: "Garage corner" } });
+    expect(r.segments[2]).toEqual(set.segments[2]);
+  });
+
+  it("renames a range and the segments on it", () => {
+    const r = renameLabel(set, { range: "Roof" }, "Eaves")!;
+    expect(r.ranges[0]!.label).toBe("Eaves");
+    expect(r.segments[2]).toMatchObject({ range: "Eaves" });
+    expect(r.segments[0]).toEqual(set.segments[0]);
+  });
+
+  it("refuses empty names and names already taken", () => {
+    expect(renameLabel(set, { marker: 10 }, "  ")).toBeNull();
+    expect(renameLabel(set, { marker: 10 }, "Door")).toBeNull();
+    expect(renameLabel({ ...set, ranges: [...set.ranges, { label: "Porch", spans: [{ start: 50, stop: 60 }] }] }, { range: "Roof" }, "Porch")).toBeNull();
+    // A marker may share a range's name: they're looked up separately.
+    expect(renameLabel(set, { marker: 10 }, "Roof")).not.toBeNull();
+  });
+
+  it("leaves segments on a marker label another marker still has", () => {
+    const dup = { ...set, markers: [...set.markers, { index: 70, label: "Corner" }] };
+    const r = renameLabel(dup, { marker: 10 }, "Left corner")!;
+    expect(r.markers.map((m) => m.label)).toEqual(["Left corner", "Door", "Corner"]);
+    expect(r.segments).toEqual(set.segments);
   });
 });

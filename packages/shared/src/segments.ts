@@ -104,6 +104,43 @@ function resolveGeometry(entry: SegmentDefinition, { markers, ranges }: SegmentC
   return e < s ? { ok: true, first: e + extra, last: s, rev: true } : { ok: true, first: s, last: e - extra, rev: false };
 }
 
+export type LabelSet = { markers: LedMarker[]; ranges: LedRange[]; segments: SegmentDefinition[] };
+
+/**
+ * Renames a marker (by its LED) or a range (by its label) to `to`, and points the segments defined on it at
+ * the new name, so they keep their LEDs. Returns null when `to` is empty or already names another of the same
+ * kind. A marker sharing its old label with another marker leaves the segments alone: they follow the other.
+ */
+export function renameLabel(set: LabelSet, target: { marker: number } | { range: string }, to: string): LabelSet | null {
+  const name = to.trim();
+  if (!name) return null;
+  let from: string;
+  let markers = set.markers;
+  let ranges = set.ranges;
+  if ("marker" in target) {
+    const m = markers.find((x) => x.index === target.marker);
+    if (!m || markers.some((x) => x !== m && x.label === name)) return null;
+    from = m.label;
+    markers = markers.map((x) => (x === m ? { ...x, label: name } : x));
+    if (markers.some((x) => x.label === from)) return { ...set, markers };
+  } else {
+    from = target.range;
+    if (!ranges.some((r) => r.label === from) || (name !== from && ranges.some((r) => r.label === name))) return null;
+    ranges = ranges.map((r) => (r.label === from ? { ...r, label: name } : r));
+  }
+  if (name === from) return { ...set, markers, ranges };
+  const segments = set.segments.map((d): SegmentDefinition => {
+    if (isRangeEntry(d)) return "range" in target && d.range === from ? { ...d, range: name } : d;
+    if (!("marker" in target)) return d;
+    return {
+      ...d,
+      start: d.start === from ? name : d.start,
+      end: d.end.type === "marker" && d.end.label === from ? { ...d.end, label: name } : d.end,
+    };
+  });
+  return { markers, ranges, segments };
+}
+
 /** Pairs of positions whose segments share LEDs. */
 export function overlappingSegments(segments: ({ start: number; stop: number } | undefined)[]): [number, number][] {
   const pairs: [number, number][] = [];
