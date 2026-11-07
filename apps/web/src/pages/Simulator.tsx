@@ -23,6 +23,7 @@ import { CATALOG, LedCanvas, isHidden, segmentName, simEffect, type Hidden } fro
 import { LayoutView } from "../components/sim/LayoutView";
 import { layoutSummary, useLayoutView } from "../components/sim/ViewPicker";
 import { useControllers, useLayeredEffects, usePalettes, usePresets, useWritePreset } from "../queries";
+import { PatternBuilder } from "../components/preset/PatternBuilder";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
 import { copyName, isClearMarker, newSegment } from "../components/preset/describe";
 import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
@@ -30,7 +31,7 @@ import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
 const COUNT_KEY = "simLedCount";
 const RGBW_KEY = "simRgbw";
 const MAX_LEDS = 2000;
-const scratchState = (): PresetState => ({ on: true, bri: 128, seg: [{ id: 0, fx: 0, col: [[255, 170, 0]], pal: 0 }] });
+const scratchState = (): PresetState => ({ on: true, bri: 128, seg: [{ id: 0, bm: 0, fx: 0, col: [[255, 170, 0]], pal: 0 }] });
 const savedLedCount = () => {
   const n = Number(localStorage.getItem(COUNT_KEY));
   return Number.isInteger(n) && n >= 1 && n <= MAX_LEDS ? n : 60;
@@ -88,6 +89,7 @@ export function Simulator() {
   // By position in state.seg. Simulator only: neither is saved with the preset.
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [hidden, setHidden] = useState<Hidden>(new Set());
+  const [patternOpen, setPatternOpen] = useState(false);
   const toggleIn = (set: Set<number>, i: number) => {
     const next = new Set(set);
     if (!next.delete(i)) next.add(i);
@@ -269,6 +271,29 @@ export function Simulator() {
     setGroups(copied.groups);
     setHidden(remapSegments(hidden, (p) => (real.includes(p) ? real.indexOf(p) + (real.indexOf(p) > at ? 1 : 0) : undefined)));
     setCollapsed(moved(collapsed));
+  };
+  /**
+   * Adds segments. Presets saved on a controller pad seg with clear markers up to its segment limit; as in the
+   * preset editor, each new segment takes the first marker's place (and ID), or goes on the end.
+   */
+  const addSegments = (added: Segment[]) => {
+    const seg = [...segments];
+    const replaced: number[] = [];
+    for (const x of added) {
+      const p = seg.findIndex(isClearMarker);
+      if (p >= 0) {
+        seg[p] = { ...x, id: seg[p]!.id ?? p };
+        replaced.push(p);
+        continue;
+      }
+      const ids = new Set(seg.map((s, i) => s.id ?? i));
+      let id = 0;
+      while (ids.has(id)) id++;
+      seg.push({ ...x, id });
+    }
+    setState({ ...state, seg });
+    setHidden(remapSegments(hidden, (j) => (replaced.includes(j) ? undefined : j)));
+    setCollapsed(new Set([...collapsed].filter((j) => !replaced.includes(j))));
   };
   const rgbw = rgbwChoice ?? segments.some((s) => s.col?.some((c) => Array.isArray(c) && c.length === 4));
   const statePresets = presets.filter((p) => p.kind === "state").sort((a, b) => a.slot - b.slot);
@@ -589,28 +614,33 @@ export function Simulator() {
             </div>
           );
         })}
-        <Button
-          onClick={() => {
-            // Presets saved on a controller pad seg with clear markers up to its segment limit; as in the
-            // preset editor, a new segment takes the first marker's place (and ID), or goes on the end.
-            const p = segments.findIndex(isClearMarker);
-            if (p >= 0) {
-              const seg = [...segments];
-              seg[p] = { ...newSegment(rgbw), id: segments[p]!.id ?? p };
-              setState({ ...state, seg });
-              setHidden(remapSegments(hidden, (j) => (j === p ? undefined : j)));
-              setCollapsed(new Set([...collapsed].filter((j) => j !== p)));
-              return;
-            }
-            const ids = new Set(segments.map((s, i) => s.id ?? i));
-            let id = 0;
-            while (ids.has(id)) id++;
-            setState({ ...state, seg: [...segments, { ...newSegment(rgbw), id }] });
-          }}
-          disabled={used >= 32}
-        >
-          Add segment
-        </Button>
+        {patternOpen && (
+          <PatternBuilder
+            rgbw={rgbw}
+            palettes={palettes}
+            ledCount={count}
+            spans={real.flatMap((p) => {
+              const s = segments[p]!;
+              return s.start !== undefined && s.stop !== undefined && s.stop > s.start ? [{ label: segmentName(s, p), start: s.start, stop: s.stop }] : [];
+            })}
+            room={32 - used}
+            onAdd={(added) => {
+              addSegments(added);
+              setPatternOpen(false);
+            }}
+            onCancel={() => setPatternOpen(false)}
+          />
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => addSegments([newSegment(rgbw)])} disabled={used >= 32}>
+            Add segment
+          </Button>
+          {!patternOpen && (
+            <Button onClick={() => setPatternOpen(true)} disabled={used >= 32} title="Repeat a run of colors along the strip, using grouping and spacing">
+              Add pattern…
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

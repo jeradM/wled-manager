@@ -7,7 +7,7 @@ import { newSegment } from "./describe";
 import { BLEND_MODES } from "./wled-options";
 
 /** A layer added with "+ Add layer": solid amber, blended normally. */
-export const newLayer = (rgbw: boolean): Layer => ({ ...newSegment(rgbw), bm: 0 });
+export const newLayer = (rgbw: boolean): Layer => newSegment(rgbw);
 
 const iconButton = "px-1 text-neutral-400 hover:text-neutral-100 disabled:opacity-30 disabled:hover:text-neutral-400";
 

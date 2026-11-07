@@ -422,7 +422,7 @@ function SidePanel({ c, segments }: { c: Controller; segments: (ResolvedSegment 
   const preview = () => {
     const seg: Segment[] = segments.flatMap((s, i) =>
       s
-        ? [{ start: s.start, stop: s.stop, rev: s.rev, grp: 1, spc: 0, of: 0, on: true, bri: 255, fx: 0, col: [segmentColor(i).slice(1)] }]
+        ? [{ start: s.start, stop: s.stop, rev: s.rev, grp: 1, spc: 0, of: 0, bm: 0, on: true, bri: 255, fx: 0, col: [segmentColor(i).slice(1)] }]
         : [],
     );
     // WLED takes hex colors; the white channel stays off. Unused segment slots are turned off.

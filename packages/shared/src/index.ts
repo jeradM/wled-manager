@@ -6,3 +6,4 @@ export * from "./presets.js";
 export * from "./segments.js";
 export * from "./layers.js";
 export * from "./layout.js";
+export * from "./pattern.js";

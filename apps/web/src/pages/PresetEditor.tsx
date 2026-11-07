@@ -35,6 +35,7 @@ import {
   usePresetTest,
   useSavePreset,
 } from "../queries";
+import { PatternBuilder } from "../components/preset/PatternBuilder";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
 import { copyName, isClearMarker, newSegment, rawKind } from "../components/preset/describe";
 import { TRANSITION_STYLES } from "../components/preset/wled-options";
@@ -111,6 +112,7 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
 
   const [jsonMode, setJsonMode] = useState(false);
   const [openGroup, setOpenGroup] = useState<number | null>(null);
+  const [patternOpen, setPatternOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   // Drag and drop: segments are dragged by their handle (so inputs stay usable) and dropped on another segment.
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -235,7 +237,8 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
     setDraft({ ...draft, state: renumberSegments({ ...draft.state!, seg }), groups: nextGroups });
   };
   const onAdd = (v: string, k?: number) => {
-    if (v === "custom") addSegments([newSegment(rgbw)], k);
+    if (v === "pattern") setPatternOpen(true);
+    else if (v === "custom") addSegments([newSegment(rgbw)], k);
     else if (v === "all")
       addSegments(
         definitions.filter((d) => !usedSids.has(d.id)).flatMap((d): Segment[] => {
@@ -275,6 +278,7 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
         </optgroup>
       )}
       <option value="custom">Custom LEDs</option>
+      {k === undefined && <option value="pattern">Repeating pattern…</option>}
     </select>
   );
   const realCount = segments.length - markers;
@@ -621,6 +625,23 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
                       These segments share LEDs: {overlaps.map(([a, b]) => `${segmentLabel(a)} & ${segmentLabel(b)}`).join(", ")}. The
                       controller allows this; the later segment draws on top.
                     </p>
+                  )}
+                  {patternOpen && (
+                    <PatternBuilder
+                      rgbw={rgbw}
+                      palettes={palettes}
+                      ledCount={sourceController?.device?.ledCount}
+                      spans={realPositions.flatMap((p) => {
+                        const g = geometry[p];
+                        return g ? [{ label: segmentLabel(p), start: g.start, stop: g.stop }] : [];
+                      })}
+                      room={maxSegments - used}
+                      onAdd={(added) => {
+                        addSegments(added);
+                        setPatternOpen(false);
+                      }}
+                      onCancel={() => setPatternOpen(false)}
+                    />
                   )}
                   <div className="flex flex-wrap items-center gap-3">
                     {addPicker()}
