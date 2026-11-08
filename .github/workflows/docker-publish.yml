@@ -3,10 +3,17 @@ name: Publish Docker image
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version tag to add, e.g. 1.2.0 (optional; every image is also tagged sha-<commit>)"
+      # The version is the newest published X.Y.Z with its patch number bumped, unless one of these is ticked.
+      new_minor:
+        description: "New Minor: bump the minor version (1.3.4 → 1.4.0) instead of the patch (→ 1.3.5)"
         required: false
-        type: string
+        type: boolean
+        default: false
+      new_major:
+        description: "New Major: bump the major version (1.3.4 → 2.0.0); wins over New Minor"
+        required: false
+        type: boolean
+        default: false
       latest:
         description: "Also tag as latest"
         required: false
@@ -43,16 +50,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Validate version
-        if: inputs.version != ''
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          if ! [[ "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$ ]]; then
-            echo "::error::'$VERSION' is not a valid Docker tag"
-            exit 1
-          fi
-
       - uses: docker/setup-qemu-action@v4
         if: contains(inputs.platforms, 'arm64')
 
@@ -69,13 +66,42 @@ jobs:
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      # The published images are the record of past versions: take the highest X.Y.Z tag and bump it.
+      # Runs are serialized (see concurrency), so two can't pick the same version.
+      - name: Next version
+        id: version
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_MAJOR: ${{ inputs.new_major }}
+          NEW_MINOR: ${{ inputs.new_minor }}
+        run: |
+          set -euo pipefail
+          repo="${IMAGE#ghcr.io/}"
+          registry_token=$(curl -fsS -u "$ACTOR:$TOKEN" "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -r .token)
+          current=$(curl -fsS -H "Authorization: Bearer $registry_token" "https://ghcr.io/v2/${repo}/tags/list?n=10000" \
+            | jq -r '.tags[]?' | { grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)
+          current=${current:-0.0.0}
+          IFS=. read -r major minor patch <<< "$current"
+          if [[ "$NEW_MAJOR" == "true" ]]; then
+            major=$((major + 1)); minor=0; patch=0
+          elif [[ "$NEW_MINOR" == "true" ]]; then
+            minor=$((minor + 1)); patch=0
+          else
+            patch=$((patch + 1))
+          fi
+          next="$major.$minor.$patch"
+          echo "Previous version: $current, next: $next"
+          echo "value=$next" >> "$GITHUB_OUTPUT"
+
       - uses: docker/metadata-action@v6
         id: meta
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
             type=sha,prefix=sha-
-            type=raw,value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=${{ steps.version.outputs.value }}
             type=raw,value=latest,enable=${{ inputs.latest }}
 
       - uses: docker/build-push-action@v7
@@ -93,7 +119,7 @@ jobs:
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           {
-            echo "### Published"
+            echo "### Published ${{ steps.version.outputs.value }}"
             echo '```'
             echo "$TAGS"
             echo '```'
