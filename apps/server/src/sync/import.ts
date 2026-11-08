@@ -3,10 +3,13 @@ import {
   canonicalJson,
   customPaletteId,
   importPreset,
+  isStatePreset,
+  pullPreset,
   paletteKey,
   paletteStopsFor,
   remapPresetRefs,
-  segmentSets,
+  renderPreset,
+  type DevicePreset,
   type ImportPalette,
   type ImportPreset,
   type ImportPreview,
@@ -20,21 +23,11 @@ import type { EventBus } from "../events.js";
 import type { ControllerService } from "../services/controllers.js";
 import type { PaletteService } from "../services/palettes.js";
 import type { PresetService } from "../services/presets.js";
-import type { SettingsService } from "../services/settings.js";
 import { readDevice, type DeviceSnapshot } from "./device.js";
 import type { ControllerLocks } from "./locks.js";
-import { controllerPresets } from "./preset-slots.js";
+import type { SyncService } from "./sync.js";
 
-/** What decides whether a library preset matches a device preset: its settings and the WLED set each segment goes in. */
-const comparable = (p: Pick<PresetInput, "name" | "ql" | "kind" | "state" | "raw" | "groups">) =>
-  canonicalJson({
-    name: p.name,
-    ql: p.ql ?? null,
-    kind: p.kind,
-    state: p.state ?? null,
-    raw: p.raw ?? null,
-    sets: (p.state && segmentSets(p.state.seg, p.groups)) ?? null,
-  });
+type Read = Awaited<ReturnType<ImportService["read"]>>;
 
 /**
  * Pulls a controller's custom palettes and presets into the library. Only reads from the device. Imported
@@ -48,82 +41,78 @@ export class ImportService {
     private controllers: ControllerService,
     private palettes: PaletteService,
     private presets: PresetService,
-    private settings: SettingsService,
+    private sync: SyncService,
   ) {}
 
   async preview(controllerId: string): Promise<ImportPreview> {
-    const { device, effects } = await this.read(controllerId);
-    const library = this.palettes.list();
-
-    const palettes: ImportPalette[] = [...device.palettes]
-      .filter(([, p]) => p.stops)
-      .map(([slot, p]) => {
-        const match = library.find((l) => paletteKey(paletteStopsFor(l, controllerId)) === p.key);
-        return {
-          slot,
-          deviceId: customPaletteId(slot, device.base),
-          stops: p.stops!,
-          status: match ? "in-library" : "new",
-          ...(match ? { libraryPaletteId: match.id, libraryName: match.name } : {}),
-        };
-      });
-
-    // For comparison, link device palettes to library palettes that already match.
+    const read = await this.read(controllerId);
+    const palettes = this.paletteStatus(controllerId, read);
     const libraryPalette = (deviceId: number) => palettes.find((p) => p.deviceId === deviceId)?.libraryPaletteId;
-    const { libraryPreset, toLibrary } = this.slotMatching(controllerId, [...device.presets.keys()]);
-    const presets: ImportPreset[] = [...device.presets].map(([slot, raw]) => {
-      const imported = toLibrary(importPreset(slot, raw, { effects, libraryPalette }));
-      const existing = libraryPreset(slot);
-      const status = !existing ? "new" : comparable(existing) === comparable(imported) ? "identical" : "conflict";
+    const match = this.presetMatching(controllerId, read, [...read.device.presets.keys()], libraryPalette);
+    const presets: ImportPreset[] = [...read.device.presets].map(([slot, raw]) => {
+      const m = match(slot, raw);
       return {
         slot,
-        name: imported.name,
-        kind: imported.kind,
-        status,
-        ...(existing ? { libraryPresetId: existing.id, libraryName: existing.name } : {}),
-        paletteSlots: this.customPaletteSlots(raw, device),
+        name: m.imported.name,
+        kind: m.imported.kind,
+        status: m.status,
+        ...(m.existing ? { libraryPresetId: m.existing.id, libraryName: m.existing.name } : {}),
+        ...(m.status === "changed" || m.status === "conflict" ? { edited: m.edited } : {}),
+        ...(m.pulled ? { changes: m.pulled.changes, notes: m.pulled.notes } : {}),
+        paletteSlots: this.customPaletteSlots(raw, read.device),
       };
     });
-
     return { controllerId, palettes, presets };
   }
 
   apply(controllerId: string, request: ImportRequest): Promise<ImportResult> {
     return this.locks.run(controllerId, async () => {
-      const { device, effects, name } = await this.read(controllerId);
-      const result: ImportResult = { palettesCreated: 0, palettesLinked: 0, presetsImported: 0 };
+      const read = await this.read(controllerId);
+      const { device, name } = read;
+      const result: ImportResult = { palettesCreated: 0, palettesUpdated: 0, palettesLinked: 0, presetsImported: 0 };
 
-      // ---- Palettes: link identical library palettes, create the rest ----
+      // ---- Palettes: link identical library palettes, update changed ones, create the rest ----
       const libraryByDeviceId = new Map<number, string>();
-      const library = this.palettes.list();
       const wanted = new Set(request.palettes);
-      for (const [slot, p] of device.palettes) {
-        if (!p.stops) continue;
-        let id = library.find((l) => paletteKey(paletteStopsFor(l, controllerId)) === p.key)?.id;
-        if (id) {
-          result.palettesLinked++;
-        } else if (wanted.has(slot)) {
-          id = this.palettes.create({ name: `${name} #${slot}`, stops: p.stops.slice(0, 16) }).id;
+      const writtenPalettes: Record<string, string> = {};
+      for (const p of this.paletteStatus(controllerId, read)) {
+        const key = device.palettes.get(p.slot)!.key!;
+        let id = p.libraryPaletteId;
+        if (p.status === "in-library") result.palettesLinked++;
+        else if (p.status === "changed" && wanted.has(p.slot)) {
+          // The controller's own version, when the palette has one; otherwise the palette itself.
+          const palette = this.palettes.get(id!);
+          const stops = p.stops.slice(0, 16);
+          const { id: _, revision, updatedAt, ...input } = palette;
+          const own = palette.variants.some((v) => v.controllerId === controllerId);
+          this.palettes.update(id!, own ? { ...input, variants: palette.variants.map((v) => (v.controllerId === controllerId ? { ...v, stops } : v)) } : { ...input, stops });
+          writtenPalettes[p.slot] = key;
+          result.palettesUpdated++;
+        } else if (p.status === "new" && wanted.has(p.slot)) {
+          id = this.palettes.create({ name: `${name} #${p.slot}`, stops: p.stops.slice(0, 16) }).id;
           result.palettesCreated++;
         }
         if (id) {
-          libraryByDeviceId.set(customPaletteId(slot, device.base), id);
-          this.recordPaletteSlot(controllerId, id, slot, p.key!);
+          libraryByDeviceId.set(p.deviceId, id);
+          this.recordPaletteSlot(controllerId, id, p.slot, key);
         }
       }
+      this.mergeSyncState(controllerId, { writtenPalettes });
 
-      // ---- Presets ----
+      // ---- Presets: pull changed settings into matching library presets, replace or add the rest ----
       const libraryPalette = (deviceId: number) => libraryByDeviceId.get(deviceId);
       const writtenPresets: Record<string, string> = {};
-      const { libraryPreset, toLibrary } = this.slotMatching(controllerId, request.presets.filter((s) => device.presets.has(s)));
+      const match = this.presetMatching(controllerId, read, request.presets.filter((s) => device.presets.has(s)), libraryPalette);
       for (const slot of request.presets) {
         const raw = device.presets.get(slot);
         if (!raw) continue;
-        const imported = toLibrary(importPreset(slot, raw, { effects, libraryPalette }));
-        const existing = libraryPreset(slot);
-        if (existing)
-          this.presets.update(existing.id, { ...imported, folder: existing.folder, sync: existing.sync, controllers: existing.controllers });
-        else this.presets.upsertBySlot(imported);
+        const m = match(slot, raw);
+        if (m.status === "identical") continue;
+        if (m.existing) {
+          const { id: _, revision, updatedAt, ...current } = m.existing;
+          const keep = { folder: current.folder, sync: current.sync, controllers: current.controllers };
+          this.presets.update(m.existing.id, m.pulled ? { ...m.pulled.preset, ...keep } : { ...m.imported, ...keep });
+        } else this.presets.upsertBySlot(m.imported);
         writtenPresets[slot] = canonicalJson(raw);
         result.presetsImported++;
       }
@@ -131,6 +120,53 @@ export class ImportService {
 
       return result;
     });
+  }
+
+  /** The controller's custom palettes, matched to library palettes. */
+  private paletteStatus(controllerId: string, { device }: Read): ImportPalette[] {
+    const library = this.palettes.list();
+    const written = this.syncState(controllerId)?.writtenPalettes ?? {};
+    const slotRows = this.db.select().from(controllerPaletteSlots).where(eq(controllerPaletteSlots.controllerId, controllerId)).all();
+    return [...device.palettes]
+      .filter(([, p]) => p.stops)
+      .map(([slot, p]): ImportPalette => {
+        const base = { slot, deviceId: customPaletteId(slot, device.base), stops: p.stops! };
+        // The palette sync keeps in this slot, if any.
+        const own = library.find((l) => slotRows.some((r) => r.slot === slot && r.paletteId === l.id));
+        if (own && paletteKey(paletteStopsFor(own, controllerId)) !== p.key)
+          return { ...base, status: "changed", edited: p.key !== written[slot], libraryPaletteId: own.id, libraryName: own.name };
+        const match = own ?? library.find((l) => paletteKey(paletteStopsFor(l, controllerId)) === p.key);
+        return { ...base, status: match ? "in-library" : "new", ...(match ? { libraryPaletteId: match.id, libraryName: match.name } : {}) };
+      });
+  }
+
+  /**
+   * How each controller preset compares with the library preset sync puts in its slot: the same as sync would
+   * write, different settings that can be pulled in, or different enough to replace it. `deviceSlots` are the
+   * slots that may become new library presets.
+   */
+  private presetMatching(controllerId: string, { device, effects }: Read, deviceSlots: number[], libraryPalette: (id: number) => string | undefined) {
+    const target = this.sync.target(controllerId, device, effects);
+    const { libraryPreset, toLibrary } = this.slotMatching(target, deviceSlots);
+    const written = this.syncState(controllerId)?.writtenPresets ?? {};
+    return (slot: number, raw: DevicePreset) => {
+      const imported = toLibrary(importPreset(slot, raw, { effects, libraryPalette }));
+      const existing = libraryPreset(slot);
+      if (!existing) return { status: "new" as const, imported };
+      const rendered = renderPreset(existing, target.renderCtx);
+      const edited = canonicalJson(raw) !== written[slot];
+      if (canonicalJson(rendered.json) === canonicalJson(raw)) return { status: "identical" as const, imported, existing };
+      const { id: _, revision, updatedAt, ...current } = existing;
+      const pulled = isStatePreset(raw) ? pullPreset(current, rendered, raw, { effects, libraryPalette }) : null;
+      if (!pulled) return { status: "conflict" as const, imported, existing, edited };
+      // Nothing the library keeps differs, e.g. only settings WLED adds when saving a preset.
+      if (canonicalJson(pulled.preset) === canonicalJson(current)) return { status: "identical" as const, imported, existing };
+      return { status: "changed" as const, imported, existing, edited, pulled };
+    };
+  }
+
+  private syncState(controllerId: string) {
+    return this.db.select().from(syncState).where(eq(syncState.controllerId, controllerId)).get();
   }
 
   private async read(controllerId: string) {
@@ -149,9 +185,8 @@ export class ImportService {
    * and presets new to the library take free library slots (`deviceSlots` are those that may need one), with
    * playlists pointed at the library slots.
    */
-  private slotMatching(controllerId: string, deviceSlots: number[]) {
+  private slotMatching({ going, slotOf, ordered }: ReturnType<SyncService["target"]>, deviceSlots: number[]) {
     const all = this.presets.list();
-    const { going, slotOf, ordered } = controllerPresets(all, controllerId, this.controllers, this.settings.get().presetSlots);
     if (!ordered) return { libraryPreset: (slot: number) => this.presets.bySlot(slot), toLibrary: (p: PresetInput) => p };
     const atDevice = new Map(going.map((p) => [slotOf(p), p]));
     const used = new Set(all.map((p) => p.slot));

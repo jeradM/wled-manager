@@ -45,7 +45,7 @@ export function ControllerDetail() {
               <Button>Segments</Button>
             </Link>
             <Button onClick={() => setImporting(true)} disabled={importing || c.status !== "online"}>
-              Import from controller
+              Pull from controller
             </Button>
             <Button onClick={() => refresh.mutate(c.id)} disabled={refresh.isPending}>
               {refresh.isPending ? "Refreshing…" : "Refresh"}
@@ -58,7 +58,7 @@ export function ControllerDetail() {
         <DeviceInfo c={c} />
         {c.status === "online" ? <QuickControls id={c.id} /> : <Card><p className="text-sm text-neutral-400">Controls are available when the controller is online.</p></Card>}
         {importing && <ImportPanel controllerId={c.id} onClose={() => setImporting(false)} />}
-        <SyncCard controllerId={c.id} online={c.status === "online"} />
+        <SyncCard controllerId={c.id} online={c.status === "online"} onPull={() => setImporting(true)} />
         <Settings c={c} />
         <SetupFile c={c} />
       </div>

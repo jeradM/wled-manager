@@ -211,7 +211,7 @@ describe("import", () => {
     await post("/api/palettes", { name: "Already here", stops: red });
 
     const result = await post(`/api/controllers/${c.id}/import`, { palettes: [0, 1], presets: [1, 2, 3, 4] });
-    expect(result).toEqual({ palettesCreated: 1, palettesLinked: 1, presetsImported: 4 });
+    expect(result).toEqual({ palettesCreated: 1, palettesUpdated: 0, palettesLinked: 1, presetsImported: 4 });
 
     const palettes = await get<Palette[]>("/api/palettes");
     expect(palettes.map((p) => p.name)).toEqual(["Already here", "Porch #1"]);
@@ -264,10 +264,8 @@ describe("import", () => {
       n: "Grouped",
     };
     mock.files.set("/presets.json", JSON.stringify({ "0": {}, "7": device }));
-    // A library preset with the same settings but no groups isn't the same: re-importing adds the groups.
-    await post("/api/presets", { slot: 7, name: "Grouped", kind: "state", state: { seg: device.seg } });
     const before = await get<ImportPreview>(`/api/controllers/${c.id}/import`);
-    expect(before.presets[0]!.status).toBe("conflict");
+    expect(before.presets[0]!.status).toBe("new");
 
     await post(`/api/controllers/${c.id}/import`, { palettes: [], presets: [7] });
     const [p] = await get<Preset[]>("/api/presets");
@@ -275,6 +273,81 @@ describe("import", () => {
     expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
     expect((await get<ImportPreview>(`/api/controllers/${c.id}/import`)).presets[0]!.status).toBe("identical");
     expect(mock.writes).toEqual([]);
+  });
+
+  it("pulls changes made on the controller back into library presets and palettes", async () => {
+    const c = await setup({ ledCount: 60 });
+    await t.app.inject({
+      method: "PATCH",
+      url: `/api/controllers/${c.id}`,
+      payload: { segments: [{ id: "roof", name: "Roof", start: 10, end: { type: "length", count: 20 } }] },
+    });
+    const pal = await post<Palette>("/api/palettes", { name: "Fire", stops: red });
+    const effect = await post<{ id: string }>("/api/effects", { name: "Glow", layers: [{ fx: 2, fxName: "Breathe", sx: 128 }] });
+    await post("/api/presets", {
+      slot: 1,
+      name: "Evening",
+      kind: "state",
+      state: {
+        bri: 100,
+        seg: [
+          { id: 0, start: 0, stop: 421, fx: 0, fxName: "Solid", pal: { paletteId: pal.id }, layers: [{ effectId: effect.id }] },
+          { id: 1, sid: "roof", fx: 1, fxName: "Blink", sx: 100 },
+        ],
+      },
+    });
+    await post(`/api/controllers/${c.id}/sync`, {});
+
+    // Edited in the WLED UI: brightness, the roof's speed and LEDs, the palette's colors.
+    const onDevice = devicePresets();
+    expect(onDevice["1"].seg.map((s: Segment) => [s.id, s.start, s.stop])).toEqual([[0, 0, 60], [1, 0, 60], [2, 10, 30]]);
+    onDevice["1"].bri = 50;
+    onDevice["1"].seg[2] = { ...onDevice["1"].seg[2], sx: 200, start: 12 };
+    mock.files.set("/presets.json", JSON.stringify(onDevice));
+    mock.files.set("/palette0.json", JSON.stringify({ palette: [0, "00ff00", 255, "000000"] }));
+
+    const preview = await get<ImportPreview>(`/api/controllers/${c.id}/import`);
+    expect(preview.palettes).toMatchObject([{ slot: 0, status: "changed", edited: true, libraryName: "Fire" }]);
+    expect(preview.presets).toMatchObject([
+      {
+        slot: 1,
+        status: "changed",
+        edited: true,
+        changes: ["brightness", "Roof: speed"],
+        notes: ["Roof: its LEDs come from a defined segment, so changes to them aren't pulled"],
+      },
+    ]);
+
+    const result = await post(`/api/controllers/${c.id}/import`, { palettes: [0], presets: [1] });
+    expect(result).toEqual({ palettesCreated: 0, palettesUpdated: 1, palettesLinked: 0, presetsImported: 1 });
+    expect((await get<Palette[]>("/api/palettes")).map((p) => [p.name, p.stops])).toEqual([["Fire", green]]);
+    const [p] = await get<Preset[]>("/api/presets");
+    expect(p!.state).toEqual({
+      bri: 50,
+      seg: [
+        // Still the whole of the longest controller, still linked to the effect.
+        { id: 0, start: 0, stop: 421, fx: 0, fxName: "Solid", pal: { paletteId: pal.id }, layers: [{ effectId: effect.id }] },
+        { id: 1, sid: "roof", fx: 1, fxName: "Blink", sx: 200 },
+      ],
+    });
+
+    // Editing the effect's layer on the controller unlinks it; the library newer than the controller isn't "edited".
+    const again = devicePresets();
+    again["1"].seg[1].sx = 50;
+    mock.files.set("/presets.json", JSON.stringify(again));
+    const linked = (await get<ImportPreview>(`/api/controllers/${c.id}/import`)).presets[0]!;
+    expect(linked).toMatchObject({ status: "changed", edited: true, changes: ["Segment 0 layer 2: speed"] });
+    expect(linked.notes).toEqual([
+      "Segment 0: unlinked from its layered effect, which the controller changed",
+      "Roof: its LEDs come from a defined segment, so changes to them aren't pulled",
+    ]);
+    await post(`/api/controllers/${c.id}/import`, { palettes: [], presets: [1] });
+    const [unlinked] = await get<Preset[]>("/api/presets");
+    expect(unlinked!.state!.seg[0]!.layers).toEqual([{ fx: 2, fxName: "Breathe", sx: 50 }]);
+
+    // Edited in the library since: the library is newer, not the controller.
+    await t.app.inject({ method: "PUT", url: `/api/presets/${unlinked!.id}`, payload: { ...unlinked, state: { ...unlinked!.state, bri: 80 } } });
+    expect((await get<ImportPreview>(`/api/controllers/${c.id}/import`)).presets[0]).toMatchObject({ status: "changed", edited: false });
   });
 
   it("reports conflicts with different library presets in the same slot and replaces them on import", async () => {

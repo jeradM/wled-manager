@@ -1,4 +1,4 @@
-import { expandLayers, hasEffectLinks, placementOf, resolveEffectLinks, segmentLayers, type EffectLookup } from "./layers.js";
+import { expandLayers, hasEffectLinks, placementOf, resolveEffectLinks, segmentLayers, type EffectLookup, type LayerOrigin } from "./layers.js";
 import type { Layer, PaletteRef, PresetInput, PresetState, Segment, SegmentGroup } from "./schemas.js";
 import { isClearMarker, segmentSets, type SegmentRefResolution } from "./segments.js";
 
@@ -124,6 +124,13 @@ export interface RenderContext {
 export interface RenderedPreset {
   json: DevicePreset;
   warnings: string[];
+  /**
+   * For state presets, where each WLED segment in `json.seg` came from: a segment of `seg` and its layer (0 =
+   * the bottom), or null for a clear marker.
+   */
+  origin?: (LayerOrigin | null)[];
+  /** The preset's segments with links to layered effects replaced by the effects' layers, as rendered. */
+  seg?: Segment[];
 }
 
 const resolvePalette = (pal: PaletteRef, ctx: RenderContext, warnings: string[]): number => {
@@ -275,7 +282,8 @@ export function renderPreset(preset: PresetInput, ctx: RenderContext): RenderedP
     if (main) state.mainseg = (main.id as number | undefined) ?? seg.indexOf(main);
     else delete state.mainseg;
   }
-  return { json: { ...state, seg, ...head }, warnings };
+  const origin = seg.map((s) => (entryOf.has(s) ? expanded.origin[entryOf.get(s)!]! : null));
+  return { json: { ...state, seg, ...head }, warnings, origin, seg: segs };
 }
 
 /** Library palette IDs a preset references. */

@@ -134,8 +134,8 @@ describe("ordered preset slots", () => {
     a.mock.files.set("/presets.json", JSON.stringify(onA));
     const preview = (await t.app.inject({ method: "GET", url: `/api/controllers/${a.c.id}/import` })).json();
     expect(preview.presets.map((p: { slot: number; status: string; libraryName?: string }) => [p.slot, p.status, p.libraryName])).toEqual([
-      [1, "conflict", "Party"], // without Gamma, which isn't on A
-      [2, "conflict", "Beta"], // the stop LED clamped to A's 100
+      [1, "identical", "Party"], // as sync writes it here: without Gamma, which isn't on A
+      [2, "identical", "Beta"], // and with the stop LED clamped to A's 100
       [3, "identical", "Zeta"],
       [4, "identical", "alpha"],
       [9, "new", undefined],
@@ -150,6 +150,7 @@ describe("ordered preset slots", () => {
       [10, "Zeta"],
       [20, "Party"],
     ]);
-    expect(library.find((p) => p.name === "Party")!.raw).toEqual({ playlist: { ps: [10, 7], dur: [10, 20], transition: 7, end: 5 } });
+    // Identical presets are left alone: the playlist keeps Gamma, and Beta its stop LED.
+    expect(library.find((p) => p.name === "Party")!.raw).toEqual({ playlist: { ps: [10, 7, 3], dur: [10, 20, 30], transition: 7, end: 5 } });
   });
 });

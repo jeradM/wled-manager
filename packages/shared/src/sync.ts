@@ -48,8 +48,13 @@ export interface ImportPalette {
   slot: number;
   deviceId: number;
   stops: import("./schemas.js").PaletteStop[];
-  /** "in-library": an identical palette is already in the library and will be linked, not duplicated. */
-  status: "new" | "in-library";
+  /**
+   * "in-library": an identical palette is already in the library and will be linked, not duplicated.
+   * "changed": the library palette sync put in this slot differs; importing updates it.
+   */
+  status: "new" | "in-library" | "changed";
+  /** For "changed": the controller's copy isn't what sync last wrote, so it was edited there (otherwise the library is newer). */
+  edited?: boolean;
   libraryPaletteId?: string;
   libraryName?: string;
 }
@@ -58,8 +63,18 @@ export interface ImportPreset {
   slot: number;
   name: string;
   kind: import("./schemas.js").PresetKind;
-  /** "conflict": the library has a different preset in this slot, which importing replaces. */
-  status: "new" | "identical" | "conflict";
+  /**
+   * "identical": sync would write exactly this. "changed": settings differ, and importing pulls just those into
+   * the library preset. "conflict": the controller's copy is too different (other segments, or a raw preset),
+   * so importing replaces the library preset with it.
+   */
+  status: "new" | "identical" | "changed" | "conflict";
+  /** For "changed" and "conflict": the controller's copy isn't what sync last wrote, so it was edited there (otherwise the library is newer). */
+  edited?: boolean;
+  /** For "changed": what differs, e.g. "Roof: effect, speed". */
+  changes?: string[];
+  /** For "changed": changes that can't be pulled, and links importing undoes. */
+  notes?: string[];
   libraryPresetId?: string;
   libraryName?: string;
   /** Device custom palette slots this preset uses. */
@@ -79,6 +94,7 @@ export interface ImportRequest {
 
 export interface ImportResult {
   palettesCreated: number;
+  palettesUpdated: number;
   palettesLinked: number;
   presetsImported: number;
 }

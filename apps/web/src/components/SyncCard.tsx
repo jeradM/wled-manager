@@ -29,7 +29,7 @@ export function syncRisks(plan: SyncPlan) {
 }
 
 /** Shows what a sync would change on the controller and applies it on confirmation. */
-export function SyncCard({ controllerId, online }: { controllerId: string; online: boolean }) {
+export function SyncCard({ controllerId, online, onPull }: { controllerId: string; online: boolean; onPull?: () => void }) {
   const { data: plan, error, isFetching, refetch } = useSyncPlan(controllerId, online);
   const { data: palettes = [] } = usePalettes();
   const sync = useSync();
@@ -43,7 +43,7 @@ export function SyncCard({ controllerId, online }: { controllerId: string; onlin
     const message = foreign.length
       ? `These items on the controller weren't written by WLED Manager (or were changed since) and will be overwritten or removed:\n` +
         foreign.map((f) => `  ${f}`).join("\n") +
-        "\n\nImport them first if you want to keep them. Continue?"
+        "\n\nPull them from the controller first if you want to keep them. Continue?"
       : deletions
         ? `This removes ${deletions} item(s) from the controller. Continue?`
         : null;
@@ -73,8 +73,13 @@ export function SyncCard({ controllerId, online }: { controllerId: string; onlin
       <ErrorText error={error ?? sync.error} />
       {foreign.length > 0 && (
         <p className="mb-2 rounded bg-red-950/50 px-2 py-1 text-xs text-red-300">
-          {foreign.length} item(s) on this controller weren't written by WLED Manager. Syncing replaces them; import them first
-          to keep them.
+          {foreign.length} item(s) on this controller weren't written by WLED Manager, or were changed on it since. Syncing
+          replaces them; pull them into the library first to keep them.
+          {onPull && (
+            <button type="button" onClick={onPull} className="ml-2 font-medium text-red-200 underline hover:text-white">
+              Pull from controller…
+            </button>
+          )}
         </p>
       )}
       {plan?.warnings.map((w) => (

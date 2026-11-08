@@ -15,6 +15,7 @@ import {
   type PaletteStop,
   type PresetChange,
   type PresetInput,
+  type RenderContext,
   type SyncPlan,
   type SyncResult,
 } from "@wled-manager/shared";
@@ -97,6 +98,37 @@ export class SyncService {
     });
   }
 
+  /**
+   * What sync puts on a controller holding `device`: palette slots, the presets that go there and their slots,
+   * and how to render them.
+   */
+  target(controllerId: string, device: DeviceSnapshot, effects: string[]) {
+    const library = this.palettes.list();
+    const existing = Object.fromEntries(
+      this.db
+        .select()
+        .from(controllerPaletteSlots)
+        .where(eq(controllerPaletteSlots.controllerId, controllerId))
+        .all()
+        .map((r) => [r.paletteId, r.slot]),
+    );
+    const { slots, overflow } = assignPaletteSlots(existing, library.map((p) => p.id), device.max);
+    const paletteNames = new Map(library.map((p) => [p.id, p.name]));
+    const presets = controllerPresets(this.presets.list(), controllerId, this.controllers, this.settings.get().presetSlots);
+    // With ordered slots, playlists point at where their presets land on this controller.
+    const bySlot = new Map(presets.going.map((p) => [p.slot, presets.slotOf(p)]));
+    const renderCtx: RenderContext = {
+      effects,
+      devicePalette: (id: string) => (slots[id] !== undefined ? customPaletteId(slots[id]!, device.base) : undefined),
+      paletteName: (id: string) => paletteNames.get(id),
+      segment: this.segmentResolver(controllerId),
+      ledCount: device.info.leds.count,
+      ...(presets.ordered ? { presetSlot: (slot: number) => bySlot.get(slot) } : {}),
+      ...this.effectContext(),
+    };
+    return { library, slots, overflow, ...presets, renderCtx };
+  }
+
   /** Looks up defined segments on a controller, falling back to same-named segments for other controllers' definitions. */
   private segmentResolver(controllerId: string) {
     const all = this.controllers.list();
@@ -138,16 +170,7 @@ export class SyncService {
     const warnings: string[] = [];
 
     // ---- Palettes ----
-    const library = this.palettes.list();
-    const existing = Object.fromEntries(
-      this.db
-        .select()
-        .from(controllerPaletteSlots)
-        .where(eq(controllerPaletteSlots.controllerId, controllerId))
-        .all()
-        .map((r) => [r.paletteId, r.slot]),
-    );
-    const { slots, overflow } = assignPaletteSlots(existing, library.map((p) => p.id), device.max);
+    const { library, slots, overflow, going, skipped: skippedPresets, slotOf, renderCtx: ctx } = this.target(controllerId, device, row.effects ?? []);
     if (overflow.length) {
       const names = overflow.map((id) => library.find((p) => p.id === id)?.name).join(", ");
       warnings.push(`Controller holds at most ${device.max} custom palettes; not synced: ${names}`);
@@ -189,30 +212,12 @@ export class SyncService {
     paletteChanges.sort((a, b) => a.slot - b.slot);
 
     // ---- Presets ----
-    const paletteNames = new Map(library.map((p) => [p.id, p.name]));
-    const renderCtx = {
-      effects: row.effects ?? [],
-      devicePalette: (id: string) => (slots[id] !== undefined ? customPaletteId(slots[id]!, device.base) : undefined),
-      paletteName: (id: string) => paletteNames.get(id),
-      segment: this.segmentResolver(controllerId),
-      ledCount: device.info.leds.count,
-      ...this.effectContext(),
-    };
     const desiredPresets = new Map<number, DevicePreset>();
     const writtenPresets = state?.writtenPresets ?? {};
     const foreignPreset = (slot: number) => {
       const p = device.presets.get(slot);
       return p && canonicalJson(p) === writtenPresets[slot] ? {} : { replacesUnmanaged: true };
     };
-    const { going, skipped: skippedPresets, slotOf, ordered } = controllerPresets(
-      this.presets.list(),
-      controllerId,
-      this.controllers,
-      this.settings.get().presetSlots,
-    );
-    // With ordered slots, playlists point at where their presets land on this controller.
-    const bySlot = new Map(going.map((p) => [p.slot, slotOf(p)]));
-    const ctx = ordered ? { ...renderCtx, presetSlot: (slot: number) => bySlot.get(slot) } : renderCtx;
     const presetChanges: PresetChange[] = going.map((p): PresetChange => {
       const slot = slotOf(p);
       const { json, warnings: presetWarnings } = renderPreset(p, ctx);

@@ -76,8 +76,9 @@ export async function buildApp({ db, webDist, logger = true, pollIntervalMs = 0,
   app.decorate("paletteTools", new PaletteTools(controllers));
   const settings = new SettingsService(db, events, { pollIntervalMs, presetSlots: "assigned" });
   app.decorate("settings", settings);
-  app.decorate("sync", new SyncService(db, events, locks, controllers, palettes, presets, effects, settings));
-  app.decorate("imports", new ImportService(db, events, locks, controllers, palettes, presets, settings));
+  const sync = new SyncService(db, events, locks, controllers, palettes, presets, effects, settings);
+  app.decorate("sync", sync);
+  app.decorate("imports", new ImportService(db, events, locks, controllers, palettes, presets, sync));
   const locator = new LocatorService(controllers, app.log);
   app.decorate("locator", locator);
   // Hand controllers back in the state they were in if the server stops mid-session.
