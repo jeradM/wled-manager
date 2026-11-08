@@ -438,6 +438,11 @@ export const settings = z.object({
     .min(0)
     .max(3_600_000)
     .refine((ms) => ms === 0 || ms >= MIN_POLL_INTERVAL_MS, { message: "use 0 (off) or at least 5 seconds" }),
+  /**
+   * How sync numbers presets on controllers: "assigned" uses each preset's slot; "ordered" numbers each
+   * controller's presets 1, 2, 3… by group name, then preset name.
+   */
+  presetSlots: z.enum(["assigned", "ordered"]),
 });
 export type Settings = z.infer<typeof settings>;
 

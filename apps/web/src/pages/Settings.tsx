@@ -55,6 +55,39 @@ export function Settings() {
           </form>
         </Card>
       )}
+      {settings && (
+        <Card className="mt-4 max-w-xl">
+          <fieldset className="flex flex-col gap-2 text-sm" disabled={save.isPending}>
+            <legend className="mb-2 font-medium">Preset slots</legend>
+            <p className="text-xs text-neutral-500">The preset numbers sync uses on controllers.</p>
+            {(
+              [
+                ["assigned", "As assigned", "Each preset goes in the slot set in its editor, the same on every controller."],
+                [
+                  "ordered",
+                  "In order",
+                  "Each controller's presets are numbered 1, 2, 3… by group name, then preset name (presets in no group last). Slots set in the editor are ignored, and playlists follow their presets.",
+                ],
+              ] as const
+            ).map(([value, label, help]) => (
+              <label key={value} className="flex items-start gap-2">
+                <input
+                  type="radio"
+                  name="presetSlots"
+                  className="mt-1"
+                  checked={settings.presetSlots === value}
+                  onChange={() => save.mutate({ presetSlots: value })}
+                />
+                <span>
+                  {label}
+                  <span className="block text-xs text-neutral-500">{help}</span>
+                </span>
+              </label>
+            ))}
+            <p className="text-xs text-neutral-500">Takes effect at the next sync; switching renumbers presets on controllers.</p>
+          </fieldset>
+        </Card>
+      )}
     </div>
   );
 }

@@ -3,10 +3,15 @@ import { isClearMarker, segmentLayers, type Preset, type Segment } from "@wled-m
 export { isClearMarker };
 
 /**
- * Settings for a segment added in the editor: solid amber, drawn on top. The blend mode is set so a segment
- * the controller already has in that place doesn't keep its own.
+ * Settings for a segment added in the editor: solid amber, drawn on top, on all `ledCount` LEDs (when known)
+ * with no grouping, spacing or offset. Everything is set, so nothing carries over from a segment the
+ * controller already has in that place.
  */
-export const newSegment = (rgbw: boolean): Segment => ({
+export const newSegment = (rgbw: boolean, ledCount?: number): Segment => ({
+  ...(ledCount ? { start: 0, stop: ledCount } : {}),
+  grp: 1,
+  spc: 0,
+  of: 0,
   bm: 0,
   fx: 0,
   fxName: "Solid",

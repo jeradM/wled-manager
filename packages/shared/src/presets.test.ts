@@ -262,6 +262,21 @@ describe("layers", () => {
     expect(importPreset(6, device, { effects, libraryPalette }).state!.seg).toHaveLength(2);
   });
 
+  it("stops segments at the controller's last LED", () => {
+    const seg = [
+      { id: 0, start: 0, stop: 421, fx: 0 },
+      { id: 1, start: 100, stop: 169, fx: 0 },
+      { id: 2, start: 200, stop: 421, fx: 0, layers: [{ fx: 1 }] },
+      { id: 3, stop: 0 },
+    ];
+    const preset = { slot: 1, name: "Long", kind: "state" as const, state: { seg } };
+    const { json, warnings } = renderPreset(preset, { effects, devicePalette: () => undefined, ledCount: 169 });
+    const out = json.seg as { start?: number; stop: number }[];
+    expect(out.map((s) => [s.start, s.stop])).toEqual([[0, 169], [100, 169], [200, 421], [200, 421], [undefined, 0]]);
+    expect(warnings).toEqual(["segment 2 starts at LED 200, past this controller's 169 LEDs; it won't show"]);
+    expect((renderPreset(preset, { effects, devicePalette: () => undefined, ledCount: 421 }).json.seg as { stop: number }[])[0]!.stop).toBe(421);
+  });
+
   it("drops the last clear markers past 32 WLED segments", () => {
     const seg = [{ fx: 0, layers: [{ fx: 1 }] }, ...Array.from({ length: 31 }, (_, k) => ({ id: k + 1, stop: 0 }))];
     const json = renderPreset({ slot: 1, name: "Full", kind: "state", state: { seg } }, ctx).json.seg as { id: number }[];

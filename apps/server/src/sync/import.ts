@@ -5,6 +5,7 @@ import {
   importPreset,
   paletteKey,
   paletteStopsFor,
+  remapPresetRefs,
   segmentSets,
   type ImportPalette,
   type ImportPreset,
@@ -19,8 +20,10 @@ import type { EventBus } from "../events.js";
 import type { ControllerService } from "../services/controllers.js";
 import type { PaletteService } from "../services/palettes.js";
 import type { PresetService } from "../services/presets.js";
+import type { SettingsService } from "../services/settings.js";
 import { readDevice, type DeviceSnapshot } from "./device.js";
 import type { ControllerLocks } from "./locks.js";
+import { controllerPresets } from "./preset-slots.js";
 
 /** What decides whether a library preset matches a device preset: its settings and the WLED set each segment goes in. */
 const comparable = (p: Pick<PresetInput, "name" | "ql" | "kind" | "state" | "raw" | "groups">) =>
@@ -45,6 +48,7 @@ export class ImportService {
     private controllers: ControllerService,
     private palettes: PaletteService,
     private presets: PresetService,
+    private settings: SettingsService,
   ) {}
 
   async preview(controllerId: string): Promise<ImportPreview> {
@@ -66,9 +70,10 @@ export class ImportService {
 
     // For comparison, link device palettes to library palettes that already match.
     const libraryPalette = (deviceId: number) => palettes.find((p) => p.deviceId === deviceId)?.libraryPaletteId;
+    const { libraryPreset, toLibrary } = this.slotMatching(controllerId, [...device.presets.keys()]);
     const presets: ImportPreset[] = [...device.presets].map(([slot, raw]) => {
-      const imported = importPreset(slot, raw, { effects, libraryPalette });
-      const existing = this.presets.bySlot(slot);
+      const imported = toLibrary(importPreset(slot, raw, { effects, libraryPalette }));
+      const existing = libraryPreset(slot);
       const status = !existing ? "new" : comparable(existing) === comparable(imported) ? "identical" : "conflict";
       return {
         slot,
@@ -110,10 +115,15 @@ export class ImportService {
       // ---- Presets ----
       const libraryPalette = (deviceId: number) => libraryByDeviceId.get(deviceId);
       const writtenPresets: Record<string, string> = {};
+      const { libraryPreset, toLibrary } = this.slotMatching(controllerId, request.presets.filter((s) => device.presets.has(s)));
       for (const slot of request.presets) {
         const raw = device.presets.get(slot);
         if (!raw) continue;
-        this.presets.upsertBySlot(importPreset(slot, raw, { effects, libraryPalette }));
+        const imported = toLibrary(importPreset(slot, raw, { effects, libraryPalette }));
+        const existing = libraryPreset(slot);
+        if (existing)
+          this.presets.update(existing.id, { ...imported, folder: existing.folder, sync: existing.sync, controllers: existing.controllers });
+        else this.presets.upsertBySlot(imported);
         writtenPresets[slot] = canonicalJson(raw);
         result.presetsImported++;
       }
@@ -131,6 +141,39 @@ export class ImportService {
       row = this.controllers.getRow(controllerId);
     }
     return { device, effects: row.effects ?? [], name: row.name };
+  }
+
+  /**
+   * Which library preset each device slot holds, and how an imported preset becomes a library one. With assigned
+   * slots they're the same numbers. With ordered slots, a device slot holds the library preset sync puts there,
+   * and presets new to the library take free library slots (`deviceSlots` are those that may need one), with
+   * playlists pointed at the library slots.
+   */
+  private slotMatching(controllerId: string, deviceSlots: number[]) {
+    const all = this.presets.list();
+    const { going, slotOf, ordered } = controllerPresets(all, controllerId, this.controllers, this.settings.get().presetSlots);
+    if (!ordered) return { libraryPreset: (slot: number) => this.presets.bySlot(slot), toLibrary: (p: PresetInput) => p };
+    const atDevice = new Map(going.map((p) => [slotOf(p), p]));
+    const used = new Set(all.map((p) => p.slot));
+    const librarySlot = new Map<number, number>();
+    for (const slot of deviceSlots) {
+      const existing = atDevice.get(slot);
+      if (existing) librarySlot.set(slot, existing.slot);
+      else {
+        let free = 1;
+        while (used.has(free)) free++;
+        if (free > 250) continue;
+        used.add(free);
+        librarySlot.set(slot, free);
+      }
+    }
+    return {
+      libraryPreset: (slot: number) => atDevice.get(slot),
+      toLibrary: (p: PresetInput): PresetInput => {
+        const slot = librarySlot.get(p.slot) ?? p.slot;
+        return p.kind === "raw" ? { ...p, slot, raw: remapPresetRefs(p.raw!, (s) => librarySlot.get(s) ?? atDevice.get(s)?.slot) } : { ...p, slot };
+      },
+    };
   }
 
   /** Custom palette slots a device preset references. */

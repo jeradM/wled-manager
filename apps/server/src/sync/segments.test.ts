@@ -90,3 +90,66 @@ describe("which controllers a preset syncs to", () => {
     expect(await slots(b.mock, b.c)).toEqual(["1", "2", "3"]);
   });
 });
+
+describe("ordered preset slots", () => {
+  it("numbers each controller's presets by group and name, with playlists following", async () => {
+    t = await createTestApp();
+    const a = await addController("A", 100);
+    const b = await addController("B", 50);
+    const post = (payload: PresetInput) => t.app.inject({ method: "POST", url: "/api/presets", payload });
+    await post({ slot: 10, name: "Zeta", folder: "Xmas", kind: "state", state: { seg: [{ fx: 0, fxName: "Solid" }] } });
+    await post({ slot: 5, name: "alpha", kind: "state", state: { seg: [{ fx: 1, fxName: "Blink" }] } });
+    await post({ slot: 7, name: "Beta", folder: "Xmas", kind: "state", state: { seg: [{ start: 0, stop: 421, fx: 2 }] } });
+    await post({ slot: 3, name: "Gamma", kind: "state", state: { seg: [{ fx: 3 }] }, controllers: [b.c.id] });
+    await post({
+      slot: 20,
+      name: "Party",
+      folder: "A",
+      kind: "raw",
+      raw: { playlist: { ps: [10, 7, 3], dur: [10, 20, 30], transition: 7, end: 5 } },
+    });
+    await t.app.inject({ method: "PUT", url: "/api/settings", payload: { presetSlots: "ordered" } });
+
+    const plan = (await t.app.inject({ method: "GET", url: `/api/controllers/${a.c.id}/sync-plan` })).json();
+    expect(plan.presets.map((p: { slot: number; name: string }) => [p.slot, p.name])).toEqual([
+      [1, "Party"],
+      [2, "Beta"],
+      [3, "Zeta"],
+      [4, "alpha"],
+    ]);
+    expect(plan.presets[0].warnings).toEqual(["preset in slot 3 isn't on this controller; left out"]);
+    await t.app.inject({ method: "POST", url: `/api/controllers/${a.c.id}/sync` });
+    const onA = JSON.parse(a.mock.files.get("/presets.json")!);
+    expect(onA["1"].playlist).toEqual({ ps: [3, 2], dur: [10, 20], transition: 7, end: 4 });
+    expect(onA["2"].seg[0].stop).toBe(100);
+
+    await t.app.inject({ method: "POST", url: `/api/controllers/${b.c.id}/sync` });
+    const onB = JSON.parse(b.mock.files.get("/presets.json")!);
+    expect(Object.keys(onB).filter((k) => k !== "0").map((k) => onB[k].n)).toEqual(["Party", "Beta", "Zeta", "alpha", "Gamma"]);
+    expect(onB["1"].playlist.ps).toEqual([3, 2, 5]);
+    expect(onB["2"].seg[0].stop).toBe(50);
+
+    // Importing back matches presets by where sync put them, and gives new ones free library slots.
+    onA["9"] = { n: "New", seg: [{ fx: 4 }] };
+    a.mock.files.set("/presets.json", JSON.stringify(onA));
+    const preview = (await t.app.inject({ method: "GET", url: `/api/controllers/${a.c.id}/import` })).json();
+    expect(preview.presets.map((p: { slot: number; status: string; libraryName?: string }) => [p.slot, p.status, p.libraryName])).toEqual([
+      [1, "conflict", "Party"], // without Gamma, which isn't on A
+      [2, "conflict", "Beta"], // the stop LED clamped to A's 100
+      [3, "identical", "Zeta"],
+      [4, "identical", "alpha"],
+      [9, "new", undefined],
+    ]);
+    await t.app.inject({ method: "POST", url: `/api/controllers/${a.c.id}/import`, payload: { palettes: [], presets: [1, 9] } });
+    const library = (await t.app.inject({ method: "GET", url: "/api/presets" })).json() as { slot: number; name: string; raw?: unknown }[];
+    expect(library.map((p) => [p.slot, p.name])).toEqual([
+      [1, "New"],
+      [3, "Gamma"],
+      [5, "alpha"],
+      [7, "Beta"],
+      [10, "Zeta"],
+      [20, "Party"],
+    ]);
+    expect(library.find((p) => p.name === "Party")!.raw).toEqual({ playlist: { ps: [10, 7], dur: [10, 20], transition: 7, end: 5 } });
+  });
+});

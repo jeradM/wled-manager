@@ -104,6 +104,17 @@ export interface RenderContext {
    * Without it, saved start/stop values are used.
    */
   segment?: (sid: string) => SegmentRefResolution;
+  /**
+   * LEDs on the target device. Segments set to run past the end stop at it, as WLED would stop them anyway,
+   * so the stored preset matches what the controller shows; ones starting past it get a warning.
+   */
+  ledCount?: number;
+  /**
+   * The device slot of the library preset in `slot`, when sync numbers presets itself (undefined: the preset
+   * isn't on this controller). Playlists and preset commands are pointed at the new slots. Without it, slots
+   * are used as they are.
+   */
+  presetSlot?: (slot: number) => number | undefined;
   /** Layers of the library's layered effects, for layers linked to one. */
   effect?: EffectLookup;
   /** Layered effect names, for warnings. */
@@ -125,11 +136,70 @@ const resolvePalette = (pal: PaletteRef, ctx: RenderContext, warnings: string[])
 
 const MAX_WLED_SEGMENTS = 32;
 
+/** Per-entry playlist settings, which follow the playlist's presets when some are left out. */
+const PLAYLIST_LISTS = ["ps", "dur", "transition"] as const;
+
+/**
+ * A raw preset with the presets it applies (a playlist's, its end preset, a "ps" command) moved to the slots
+ * `slotOf` gives; ones it gives none for are left out, with a warning.
+ */
+export function remapPresetRefs(raw: Record<string, unknown>, slotOf: (slot: number) => number | undefined, warnings: string[] = []): Record<string, unknown> {
+  const missing = new Set<number>();
+  const map = (v: unknown) => {
+    if (typeof v !== "number" || v < 1 || v > 250) return v; // 0 and 251+ are commands, not slots
+    const to = slotOf(v);
+    if (to === undefined) missing.add(v);
+    return to;
+  };
+  const out: Record<string, unknown> = { ...raw };
+  if (typeof out.ps === "number") {
+    const to = map(out.ps);
+    if (to === undefined) delete out.ps;
+    else out.ps = to;
+  }
+  const pl = raw.playlist;
+  if (pl && typeof pl === "object" && !Array.isArray(pl)) {
+    const list = { ...(pl as Record<string, unknown>) };
+    if (Array.isArray(list.ps)) {
+      const keep = list.ps.map((v) => map(v) !== undefined);
+      const mapped = list.ps.map(map);
+      for (const k of PLAYLIST_LISTS)
+        if (Array.isArray(list[k])) list[k] = (k === "ps" ? mapped : (list[k] as unknown[])).filter((_, j) => keep[j] ?? true);
+    }
+    if (list.end !== undefined) {
+      const to = map(list.end);
+      if (to === undefined) delete list.end;
+      else list.end = to;
+    }
+    out.playlist = list;
+  }
+  if (missing.size)
+    warnings.push(`preset${missing.size > 1 ? "s" : ""} in slot${missing.size > 1 ? "s" : ""} ${[...missing].join(", ")} ${missing.size > 1 ? "aren't" : "isn't"} on this controller; left out`);
+  return out;
+}
+
+/**
+ * Device slots for presets numbered in order (1, 2, 3…): by group name, presets in no group last, then by name.
+ * Keyed by preset ID.
+ */
+export function orderedPresetSlots(presets: { id: string; name: string; slot: number; folder?: string }[]): Map<string, number> {
+  const cmp = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  const sorted = [...presets].sort(
+    (a, b) =>
+      (a.folder ? 0 : 1) - (b.folder ? 0 : 1) ||
+      cmp(a.folder ?? "", b.folder ?? "") ||
+      cmp(a.name, b.name) ||
+      a.slot - b.slot,
+  );
+  return new Map(sorted.map((p, i) => [p.id, i + 1]));
+}
+
 /** Renders a library preset as the JSON stored in the target device's presets.json. */
 export function renderPreset(preset: PresetInput, ctx: RenderContext): RenderedPreset {
   const warnings: string[] = [];
   const head = { n: preset.name, ...(preset.ql ? { ql: preset.ql } : {}) };
-  if (preset.kind === "raw") return { json: { ...preset.raw, ...head }, warnings };
+  if (preset.kind === "raw")
+    return { json: { ...(ctx.presetSlot ? remapPresetRefs(preset.raw!, ctx.presetSlot, warnings) : preset.raw), ...head }, warnings };
 
   let segs = preset.state!.seg;
   // Links to layered effects become the effects' current layers.
@@ -177,6 +247,11 @@ export function renderPreset(preset: PresetInput, ctx: RenderContext): RenderedP
       Object.assign(rendered, { start, stop, rev });
       if (name) rendered.n = name;
       else delete rendered.n;
+    } else if (ctx.ledCount !== undefined) {
+      const n = ctx.ledCount;
+      if (typeof rendered.start === "number" && rendered.start >= n) {
+        if (layer === 0) warnings.push(`segment ${segs[i]!.id ?? i} starts at LED ${rendered.start}, past this controller's ${n} LEDs; it won't show`);
+      } else if (typeof rendered.stop === "number" && rendered.stop > n) rendered.stop = n;
     }
     if (fxName !== undefined && ctx.effects.length) {
       // Effect IDs can shift between firmware versions; the name is authoritative when present.

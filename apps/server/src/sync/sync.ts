@@ -7,7 +7,6 @@ import {
   paletteFileName,
   paletteKey,
   paletteStopsFor,
-  presetSkipReason,
   renderPreset,
   resolveSegmentRef,
   stopsToWled,
@@ -26,8 +25,10 @@ import type { ControllerService } from "../services/controllers.js";
 import type { PaletteService } from "../services/palettes.js";
 import type { LayeredEffectService } from "../services/effects.js";
 import type { PresetService } from "../services/presets.js";
+import type { SettingsService } from "../services/settings.js";
 import { hasModernPalettes, type WledClient } from "../wled/client.js";
 import { readDevice, type DeviceSnapshot } from "./device.js";
+import { controllerPresets } from "./preset-slots.js";
 import type { ControllerLocks } from "./locks.js";
 
 interface DesiredPalette {
@@ -62,6 +63,7 @@ export class SyncService {
     private palettes: PaletteService,
     private presets: PresetService,
     private effects: LayeredEffectService,
+    private settings: SettingsService,
   ) {}
 
   /** Lookups for presets' links to layered effects. */
@@ -90,6 +92,7 @@ export class SyncService {
       devicePalette: (id) => (slots.has(id) ? customPaletteId(slots.get(id)!, base) : undefined),
       paletteName: (id) => names.get(id),
       segment: this.segmentResolver(controllerId),
+      ledCount: row.info?.leds.count,
       ...this.effectContext(),
     });
   }
@@ -192,6 +195,7 @@ export class SyncService {
       devicePalette: (id: string) => (slots[id] !== undefined ? customPaletteId(slots[id]!, device.base) : undefined),
       paletteName: (id: string) => paletteNames.get(id),
       segment: this.segmentResolver(controllerId),
+      ledCount: device.info.leds.count,
       ...this.effectContext(),
     };
     const desiredPresets = new Map<number, DevicePreset>();
@@ -200,29 +204,29 @@ export class SyncService {
       const p = device.presets.get(slot);
       return p && canonicalJson(p) === writtenPresets[slot] ? {} : { replacesUnmanaged: true };
     };
-    const sources = this.controllers.list();
-    const target = sources.find((c) => c.id === controllerId)!;
-    const skippedPresets: SyncPlan["skippedPresets"] = [];
-    const presetChanges: PresetChange[] = this.presets.list().flatMap((p): PresetChange[] => {
-      const reason = presetSkipReason(p, target, sources);
-      if (reason) {
-        skippedPresets.push({ presetId: p.id, slot: p.slot, name: p.name, reason });
-        return [];
-      }
-      const { json, warnings: presetWarnings } = renderPreset(p, renderCtx);
-      desiredPresets.set(p.slot, json);
-      const onDevice = device.presets.get(p.slot);
+    const { going, skipped: skippedPresets, slotOf, ordered } = controllerPresets(
+      this.presets.list(),
+      controllerId,
+      this.controllers,
+      this.settings.get().presetSlots,
+    );
+    // With ordered slots, playlists point at where their presets land on this controller.
+    const bySlot = new Map(going.map((p) => [p.slot, slotOf(p)]));
+    const ctx = ordered ? { ...renderCtx, presetSlot: (slot: number) => bySlot.get(slot) } : renderCtx;
+    const presetChanges: PresetChange[] = going.map((p): PresetChange => {
+      const slot = slotOf(p);
+      const { json, warnings: presetWarnings } = renderPreset(p, ctx);
+      desiredPresets.set(slot, json);
+      const onDevice = device.presets.get(slot);
       const action = !onDevice ? "create" : canonicalJson(onDevice) === canonicalJson(json) ? "unchanged" : "update";
-      return [
-        {
-          action,
-          slot: p.slot,
-          presetId: p.id,
-          name: p.name,
-          ...(action === "update" ? foreignPreset(p.slot) : {}),
-          ...(presetWarnings.length ? { warnings: presetWarnings } : {}),
-        },
-      ];
+      return {
+        action,
+        slot,
+        presetId: p.id,
+        name: p.name,
+        ...(action === "update" ? foreignPreset(slot) : {}),
+        ...(presetWarnings.length ? { warnings: presetWarnings } : {}),
+      };
     });
     for (const [slot, p] of device.presets) {
       if (!desiredPresets.has(slot))

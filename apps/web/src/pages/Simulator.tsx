@@ -31,7 +31,11 @@ import { Button, Card, ErrorText, Input, PageHeader } from "../components/ui";
 const COUNT_KEY = "simLedCount";
 const RGBW_KEY = "simRgbw";
 const MAX_LEDS = 2000;
-const scratchState = (): PresetState => ({ on: true, bri: 128, seg: [{ id: 0, bm: 0, fx: 0, col: [[255, 170, 0]], pal: 0 }] });
+const scratchState = (count: number): PresetState => ({
+  on: true,
+  bri: 128,
+  seg: [{ id: 0, start: 0, stop: count, grp: 1, spc: 0, of: 0, bm: 0, fx: 0, col: [[255, 170, 0]], pal: 0 }],
+});
 const savedLedCount = () => {
   const n = Number(localStorage.getItem(COUNT_KEY));
   return Number.isInteger(n) && n >= 1 && n <= MAX_LEDS ? n : 60;
@@ -79,7 +83,7 @@ export function Simulator() {
     return v === null ? null : v === "1";
   });
   const loaded = presets.find((p) => p.id === presetId && p.kind === "state");
-  const [state, setState] = useState<PresetState>(scratchState);
+  const [state, setState] = useState<PresetState>(() => scratchState(count));
   // Segment groups by position in state.seg, as in the preset editor.
   const [groups, setGroups] = useState<SegmentGroup[]>([]);
   /** The saved state and groups, to tell whether there are unsaved changes and to revert to. */
@@ -162,7 +166,7 @@ export function Simulator() {
     if (dirty && !confirm("Discard your changes to this preset?")) return;
     loadedId.current = null;
     if (!id) {
-      setState(scratchState());
+      setState(scratchState(count));
       setGroups([]);
       setSavedJson(null);
       setCollapsed(new Set());
@@ -632,7 +636,7 @@ export function Simulator() {
           />
         )}
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => addSegments([newSegment(rgbw)])} disabled={used >= 32}>
+          <Button onClick={() => addSegments([newSegment(rgbw, count)])} disabled={used >= 32}>
             Add segment
           </Button>
           {!patternOpen && (

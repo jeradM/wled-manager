@@ -501,6 +501,7 @@ export function useServerEvents() {
           break;
         case "settings.changed":
           void qc.invalidateQueries({ queryKey: keys.settings });
+          void qc.invalidateQueries({ queryKey: keys.syncPlans }); // preset slots may have changed
           break;
       }
     };

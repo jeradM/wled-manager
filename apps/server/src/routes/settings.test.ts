@@ -11,14 +11,17 @@ afterEach(async () => {
 describe("settings", () => {
   it("defaults to the startup poll interval, then saves and validates changes", async () => {
     t = await createTestApp({ pollIntervalMs: 30_000 });
-    expect((await t.app.inject({ method: "GET", url: "/api/settings" })).json()).toEqual({ pollIntervalMs: 30_000 });
+    expect((await t.app.inject({ method: "GET", url: "/api/settings" })).json()).toEqual({ pollIntervalMs: 30_000, presetSlots: "assigned" });
     const saved = await t.app.inject({ method: "PUT", url: "/api/settings", payload: { pollIntervalMs: 60_000 } });
-    expect(saved.json()).toEqual({ pollIntervalMs: 60_000 });
-    expect((await t.app.inject({ method: "GET", url: "/api/settings" })).json()).toEqual({ pollIntervalMs: 60_000 });
+    expect(saved.json()).toEqual({ pollIntervalMs: 60_000, presetSlots: "assigned" });
+    expect((await t.app.inject({ method: "GET", url: "/api/settings" })).json()).toEqual({ pollIntervalMs: 60_000, presetSlots: "assigned" });
+    expect((await t.app.inject({ method: "PUT", url: "/api/settings", payload: { presetSlots: "ordered" } })).json().presetSlots).toBe("ordered");
+    expect((await t.app.inject({ method: "PUT", url: "/api/settings", payload: { presetSlots: "random" } })).statusCode).toBe(400);
     for (const pollIntervalMs of [1_000, -1, 4_000_000])
       expect((await t.app.inject({ method: "PUT", url: "/api/settings", payload: { pollIntervalMs } })).statusCode).toBe(400);
     expect((await t.app.inject({ method: "PUT", url: "/api/settings", payload: { pollIntervalMs: 0 } })).json()).toEqual({
       pollIntervalMs: 0,
+      presetSlots: "ordered",
     });
   });
 

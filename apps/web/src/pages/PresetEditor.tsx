@@ -34,6 +34,7 @@ import {
   usePresets,
   usePresetTest,
   useSavePreset,
+  useSettings,
 } from "../queries";
 import { PatternBuilder } from "../components/preset/PatternBuilder";
 import { SegmentEditor } from "../components/preset/SegmentEditor";
@@ -83,6 +84,7 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
     controllers[0];
   const { data: catalog } = useCatalog(sourceController?.id);
   const rgbw = sourceController?.device?.rgbw ?? false;
+  const orderedSlots = useSettings().data?.presetSlots === "ordered";
 
   const freeSlot = useMemo(() => {
     const used = new Set(allPresets.map((p) => p.slot));
@@ -238,7 +240,7 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
   };
   const onAdd = (v: string, k?: number) => {
     if (v === "pattern") setPatternOpen(true);
-    else if (v === "custom") addSegments([newSegment(rgbw)], k);
+    else if (v === "custom") addSegments([newSegment(rgbw, sourceController?.device?.ledCount)], k);
     else if (v === "all")
       addSegments(
         definitions.filter((d) => !usedSids.has(d.id)).flatMap((d): Segment[] => {
@@ -495,7 +497,9 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
             </div>
             {slotTaken && <p className="mt-2 text-xs text-red-400">Slot {draft.slot} is used by "{slotTaken.name}".</p>}
             <p className="mt-2 text-xs text-neutral-500">
-              The slot is the preset number on every controller, as used by buttons, playlists and integrations.
+              {orderedSlots
+                ? "Sync numbers presets in order by group and name (see Settings), so this slot isn't used on controllers."
+                : "The slot is the preset number on every controller, as used by buttons, playlists and integrations."}
             </p>
           </Card>
 

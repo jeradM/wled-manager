@@ -74,12 +74,12 @@ export async function buildApp({ db, webDist, logger = true, pollIntervalMs = 0,
   app.decorate("effects", effects);
   app.decorate("layouts", new LayoutService(db, events));
   app.decorate("paletteTools", new PaletteTools(controllers));
-  app.decorate("sync", new SyncService(db, events, locks, controllers, palettes, presets, effects));
-  app.decorate("imports", new ImportService(db, events, locks, controllers, palettes, presets));
+  const settings = new SettingsService(db, events, { pollIntervalMs, presetSlots: "assigned" });
+  app.decorate("settings", settings);
+  app.decorate("sync", new SyncService(db, events, locks, controllers, palettes, presets, effects, settings));
+  app.decorate("imports", new ImportService(db, events, locks, controllers, palettes, presets, settings));
   const locator = new LocatorService(controllers, app.log);
   app.decorate("locator", locator);
-  const settings = new SettingsService(db, events, { pollIntervalMs });
-  app.decorate("settings", settings);
   // Hand controllers back in the state they were in if the server stops mid-session.
   app.addHook("onClose", async () => locator.stopAll());
 

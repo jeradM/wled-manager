@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { presetPaletteIds, presetSkipReason, stopsToCss, type Preset } from "@wled-manager/shared";
-import { useCatalog, useControllers, useMovePresets, usePalettes, usePresets, useSetPresetSync } from "../queries";
+import { orderedPresetSlots, presetPaletteIds, presetSkipReason, stopsToCss, type Preset } from "@wled-manager/shared";
+import { useCatalog, useControllers, useMovePresets, usePalettes, usePresets, useSetPresetSync, useSettings } from "../queries";
 import { effectNames, rawKind, realSegments } from "../components/preset/describe";
 import { Button, Card, ErrorText, PageHeader } from "../components/ui";
 
@@ -20,7 +20,14 @@ const loadCollapsed = (): Set<string> => {
 const DRAG_TYPE = "application/x-wled-presets";
 
 export function Presets() {
-  const { data: presets = [], isLoading } = usePresets();
+  const { data: listed = [], isLoading } = usePresets();
+  // With ordered slots, presets are listed in the order sync numbers them.
+  const ordered = useSettings().data?.presetSlots === "ordered";
+  const presets = useMemo(() => {
+    if (!ordered) return listed;
+    const at = orderedPresetSlots(listed);
+    return [...listed].sort((a, b) => at.get(a.id)! - at.get(b.id)!);
+  }, [listed, ordered]);
   const { data: palettes = [] } = usePalettes();
   const { data: controllers = [] } = useControllers();
   const { data: catalog } = useCatalog(controllers[0]?.id);
@@ -46,7 +53,9 @@ export function Presets() {
   const [dropOn, setDropOn] = useState<string | null>(null);
 
   // Named groups alphabetically, then presets in no group.
-  const names = [...new Set(presets.flatMap((p) => (p.folder ? [p.folder] : [])))].sort((a, b) => a.localeCompare(b));
+  const names = [...new Set(presets.flatMap((p) => (p.folder ? [p.folder] : [])))].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+  );
   const sections: { folder: string; presets: Preset[] }[] = names.map((folder) => ({
     folder,
     presets: presets.filter((p) => p.folder === folder),
@@ -152,7 +161,12 @@ export function Presets() {
                   <th className="w-14 px-2 py-2 font-medium" title="Sync to controllers. Off keeps the preset in the app only.">
                     Sync
                   </th>
-                  <th className="w-14 px-4 py-2 font-medium">Slot</th>
+                  <th
+                    className="w-14 px-4 py-2 font-medium"
+                    title={ordered ? "Not used on controllers: sync numbers presets in this order (see Settings)" : undefined}
+                  >
+                    Slot
+                  </th>
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-4 py-2 font-medium">Contents</th>
                   <th className="px-4 py-2 font-medium">Palettes</th>
@@ -289,7 +303,7 @@ export function Presets() {
                             <td className="px-2 py-2">
                               <SyncSwitch on={syncing(p) ? 1 : 0} of={1} disabled={setSync.isPending} onChange={(on) => syncTo([p.id], on)} label={p.name} />
                             </td>
-                            <td className="px-4 py-2 text-neutral-400">{p.slot}</td>
+                            <td className={`px-4 py-2 ${ordered ? "text-neutral-600" : "text-neutral-400"}`}>{p.slot}</td>
                             <td className="px-4 py-2">
                               <Link
                                 to="/presets/$id"
