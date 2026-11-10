@@ -115,6 +115,8 @@ export interface RenderContext {
    * are used as they are.
    */
   presetSlot?: (slot: number) => number | undefined;
+  /** Prefixes for preset names, by group. */
+  groupPrefixes?: Record<string, string>;
   /** Layers of the library's layered effects, for layers linked to one. */
   effect?: EffectLookup;
   /** Layered effect names, for warnings. */
@@ -201,10 +203,31 @@ export function orderedPresetSlots(presets: { id: string; name: string; slot: nu
   return new Map(sorted.map((p, i) => [p.id, i + 1]));
 }
 
+/** A preset's name on controllers: its group's prefix, when the group has one, then its name. */
+export function deviceName(preset: { name: string; folder?: string }, prefixes?: Record<string, string>): string {
+  const prefix = preset.folder ? prefixes?.[preset.folder] : undefined;
+  return prefix ? `${prefix} ${preset.name}` : preset.name;
+}
+
+/**
+ * A name from a controller without the group prefix sync put on it, and the group whose prefix it was. With
+ * `folder`, only that group's prefix is taken off.
+ */
+export function stripGroupPrefix(name: string, prefixes: Record<string, string> = {}, folder?: string): { name: string; folder?: string } {
+  const groups = Object.entries(prefixes)
+    .filter(([f]) => folder === undefined || f === folder)
+    .sort(([, a], [, b]) => b.length - a.length);
+  for (const [f, prefix] of groups) {
+    const rest = name.startsWith(`${prefix} `) ? name.slice(prefix.length + 1).trim() : "";
+    if (rest) return { name: rest, folder: f };
+  }
+  return { name };
+}
+
 /** Renders a library preset as the JSON stored in the target device's presets.json. */
 export function renderPreset(preset: PresetInput, ctx: RenderContext): RenderedPreset {
   const warnings: string[] = [];
-  const head = { n: preset.name, ...(preset.ql ? { ql: preset.ql } : {}) };
+  const head = { n: deviceName(preset, ctx.groupPrefixes), ...(preset.ql ? { ql: preset.ql } : {}) };
   if (preset.kind === "raw")
     return { json: { ...(ctx.presetSlot ? remapPresetRefs(preset.raw!, ctx.presetSlot, warnings) : preset.raw), ...head }, warnings };
 

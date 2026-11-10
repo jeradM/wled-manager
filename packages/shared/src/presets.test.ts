@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalJson, importPreset, isStatePreset, presetPaletteIds, renderPreset } from "./presets.js";
+import { canonicalJson, deviceName, importPreset, isStatePreset, presetPaletteIds, renderPreset, stripGroupPrefix } from "./presets.js";
 import { presetState } from "./schemas.js";
 import { expandLayers, inlineEffect, keepPadding, segmentLayers, wledSegmentCount, withLayers } from "./layers.js";
 
@@ -345,5 +345,21 @@ describe("links to layered effects", () => {
       { id: 0, fx: 0, col: [[255, 0, 0]], layers: [{ fx: 2, fxName: "Breathe", bm: 6 }, { effectId: "other" }] },
       { id: 1, stop: 0 },
     ]);
+  });
+});
+
+describe("group prefixes", () => {
+  const prefixes = { Xmas: "X1", "Xmas extra": "X12" };
+  it("puts a group's prefix before its presets' names", () => {
+    expect(deviceName({ name: "Glow", folder: "Xmas" }, prefixes)).toBe("X1 Glow");
+    expect(deviceName({ name: "Glow", folder: "Other" }, prefixes)).toBe("Glow");
+    expect(deviceName({ name: "Glow" }, prefixes)).toBe("Glow");
+  });
+  it("takes the longest matching prefix back off, or only the given group's", () => {
+    expect(stripGroupPrefix("X12 Glow", prefixes)).toEqual({ name: "Glow", folder: "Xmas extra" });
+    expect(stripGroupPrefix("X1 Glow", prefixes)).toEqual({ name: "Glow", folder: "Xmas" });
+    expect(stripGroupPrefix("X1 Glow", prefixes, "Xmas extra")).toEqual({ name: "X1 Glow" });
+    expect(stripGroupPrefix("X1", prefixes)).toEqual({ name: "X1" });
+    expect(stripGroupPrefix("X1Glow", prefixes)).toEqual({ name: "X1Glow" });
   });
 });

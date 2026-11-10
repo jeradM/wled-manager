@@ -205,6 +205,8 @@ export const layout = layoutInput.extend({
 export type Layout = z.infer<typeof layout>;
 
 export const presetFolder = z.string().trim().min(1).max(40);
+/** Put before the names of a group's presets on controllers, so WLED lists the group's presets together. */
+export const groupPrefix = z.string().trim().min(1).max(4);
 
 /** Moves presets into a group (folder), or out of any (null). */
 export const presetFolderMove = z.object({ ids: z.array(z.string()).min(1).max(250), folder: presetFolder.nullable() });
@@ -443,6 +445,8 @@ export const settings = z.object({
    * controller's presets 1, 2, 3… by group name, then preset name.
    */
   presetSlots: z.enum(["assigned", "ordered"]),
+  /** Prefixes for preset names on controllers, by group (see `groupPrefix`). */
+  groupPrefixes: z.record(presetFolder, groupPrefix),
 });
 export type Settings = z.infer<typeof settings>;
 

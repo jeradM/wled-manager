@@ -74,7 +74,7 @@ export async function buildApp({ db, webDist, logger = true, pollIntervalMs = 0,
   app.decorate("effects", effects);
   app.decorate("layouts", new LayoutService(db, events));
   app.decorate("paletteTools", new PaletteTools(controllers));
-  const settings = new SettingsService(db, events, { pollIntervalMs, presetSlots: "assigned" });
+  const settings = new SettingsService(db, events, { pollIntervalMs, presetSlots: "assigned", groupPrefixes: {} });
   app.decorate("settings", settings);
   const sync = new SyncService(db, events, locks, controllers, palettes, presets, effects, settings);
   app.decorate("sync", sync);

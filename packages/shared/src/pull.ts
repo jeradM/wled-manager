@@ -1,5 +1,5 @@
 import { segmentLayers, withLayers } from "./layers.js";
-import { canonicalJson, type DevicePreset, type RenderedPreset } from "./presets.js";
+import { canonicalJson, stripGroupPrefix, type DevicePreset, type RenderedPreset } from "./presets.js";
 import type { Layer, PresetInput, Segment } from "./schemas.js";
 
 /** Settings of a WLED segment that belong to a layer, with names for summaries. */
@@ -35,6 +35,8 @@ export interface PullContext {
   effects: string[];
   /** The library palette a device palette ID is, when it's one of the custom palettes sync put there. */
   libraryPalette: (devicePaletteId: number) => string | undefined;
+  /** Prefixes sync puts on preset names, by group; taken back off names pulled. */
+  groupPrefixes?: Record<string, string>;
 }
 
 export interface PulledPreset {
@@ -146,9 +148,12 @@ export function pullPreset(library: PresetInput, rendered: RenderedPreset, devic
     if (rendered.json[f] !== undefined) top.push(TOP_FIELDS[f]!);
   }
   const head: Partial<PresetInput> = {};
-  if (typeof device.n === "string" && device.n.trim() && device.n !== library.name) {
-    head.name = device.n.slice(0, 64);
-    top.unshift("name");
+  if (typeof device.n === "string" && device.n.trim() && device.n !== rendered.json.n) {
+    const name = library.folder ? stripGroupPrefix(device.n, ctx.groupPrefixes, library.folder).name : device.n;
+    if (name !== library.name) {
+      head.name = name.slice(0, 64);
+      top.unshift("name");
+    }
   }
   const ql = typeof device.ql === "string" && device.ql ? device.ql : undefined;
   if (ql !== library.ql) {

@@ -1,7 +1,16 @@
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { orderedPresetSlots, presetPaletteIds, presetSkipReason, stopsToCss, type Preset } from "@wled-manager/shared";
-import { useCatalog, useControllers, useMovePresets, usePalettes, usePresets, useSetPresetSync, useSettings } from "../queries";
+import {
+  useCatalog,
+  useControllers,
+  useMovePresets,
+  usePalettes,
+  usePresets,
+  useSaveSettings,
+  useSetPresetSync,
+  useSettings,
+} from "../queries";
 import { effectNames, rawKind, realSegments } from "../components/preset/describe";
 import { Button, Card, ErrorText, PageHeader } from "../components/ui";
 
@@ -22,7 +31,17 @@ const DRAG_TYPE = "application/x-wled-presets";
 export function Presets() {
   const { data: listed = [], isLoading } = usePresets();
   // With ordered slots, presets are listed in the order sync numbers them.
-  const ordered = useSettings().data?.presetSlots === "ordered";
+  const settings = useSettings().data;
+  const ordered = settings?.presetSlots === "ordered";
+  const prefixes = settings?.groupPrefixes ?? {};
+  const saveSettings = useSaveSettings();
+  /** Sets a group's name prefix (undefined removes it), optionally moving it to the group's new name. */
+  const setPrefix = (folder: string, prefix: string | undefined, renamedTo?: string) => {
+    const next = { ...prefixes };
+    delete next[folder];
+    if (prefix) next[renamedTo ?? folder] = prefix;
+    saveSettings.mutate({ groupPrefixes: next });
+  };
   const presets = useMemo(() => {
     if (!ordered) return listed;
     const at = orderedPresetSlots(listed);
@@ -50,6 +69,7 @@ export function Presets() {
   };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [prefixing, setPrefixing] = useState<string | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
 
   // Named groups alphabetically, then presets in no group.
@@ -93,7 +113,7 @@ export function Presets() {
           </Link>
         }
       />
-      <ErrorText error={move.error ?? setSync.error} />
+      <ErrorText error={move.error ?? setSync.error ?? saveSettings.error} />
       {!isLoading && presets.length === 0 ? (
         <Card>
           <p className="text-sm text-neutral-400">
@@ -231,6 +251,7 @@ export function Presets() {
                                   setRenaming(null);
                                   if (!name || name === folder) return;
                                   moveTo(ids, name);
+                                  if (prefixes[folder]) setPrefix(folder, prefixes[folder], name);
                                   // A collapsed group stays collapsed under its new name.
                                   if (collapsed.has(folder)) setCollapsed(new Set([...collapsed].filter((f) => f !== folder)).add(name));
                                 }}
@@ -239,6 +260,35 @@ export function Presets() {
                                   if (e.key === "Escape") setRenaming(null);
                                 }}
                                 className="w-48 rounded border border-neutral-600 bg-neutral-900 px-1.5 py-0.5 font-medium"
+                              />
+                            )}
+                            {folder && prefixing !== folder && prefixes[folder] && (
+                              <button
+                                type="button"
+                                onClick={() => setPrefixing(folder)}
+                                title={`Names on controllers start with "${prefixes[folder]} ", e.g. "${prefixes[folder]} ${members[0]?.name ?? ""}"`}
+                                className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-xs text-neutral-300 hover:bg-neutral-700"
+                              >
+                                {prefixes[folder]}
+                              </button>
+                            )}
+                            {prefixing === folder && (
+                              <input
+                                autoFocus
+                                defaultValue={prefixes[folder] ?? ""}
+                                maxLength={4}
+                                placeholder="none"
+                                aria-label={`Name prefix for ${folder}`}
+                                onBlur={(e) => {
+                                  const prefix = e.target.value.trim();
+                                  setPrefixing(null);
+                                  if (prefix !== (prefixes[folder] ?? "")) setPrefix(folder, prefix || undefined);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") e.currentTarget.blur();
+                                  if (e.key === "Escape") setPrefixing(null);
+                                }}
+                                className="w-16 rounded border border-neutral-600 bg-neutral-900 px-1.5 py-0.5 font-mono text-xs"
                               />
                             )}
                             <span className="text-xs text-neutral-500">
@@ -259,6 +309,14 @@ export function Presets() {
                                   </Link>
                                   <button type="button" onClick={() => setRenaming(folder)} className="text-neutral-400 hover:text-neutral-200">
                                     Rename
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPrefixing(folder)}
+                                    title="1–4 characters put before the names of this group's presets on controllers, so WLED lists them together"
+                                    className="text-neutral-400 hover:text-neutral-200"
+                                  >
+                                    Prefix
                                   </button>
                                   <button
                                     type="button"

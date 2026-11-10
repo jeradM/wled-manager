@@ -94,6 +94,7 @@ export class SyncService {
       paletteName: (id) => names.get(id),
       segment: this.segmentResolver(controllerId),
       ledCount: row.info?.leds.count,
+      groupPrefixes: this.settings.get().groupPrefixes,
       ...this.effectContext(),
     });
   }
@@ -114,7 +115,8 @@ export class SyncService {
     );
     const { slots, overflow } = assignPaletteSlots(existing, library.map((p) => p.id), device.max);
     const paletteNames = new Map(library.map((p) => [p.id, p.name]));
-    const presets = controllerPresets(this.presets.list(), controllerId, this.controllers, this.settings.get().presetSlots);
+    const settings = this.settings.get();
+    const presets = controllerPresets(this.presets.list(), controllerId, this.controllers, settings.presetSlots);
     // With ordered slots, playlists point at where their presets land on this controller.
     const bySlot = new Map(presets.going.map((p) => [p.slot, presets.slotOf(p)]));
     const renderCtx: RenderContext = {
@@ -123,6 +125,7 @@ export class SyncService {
       paletteName: (id: string) => paletteNames.get(id),
       segment: this.segmentResolver(controllerId),
       ledCount: device.info.leds.count,
+      groupPrefixes: settings.groupPrefixes,
       ...(presets.ordered ? { presetSlot: (slot: number) => bySlot.get(slot) } : {}),
       ...this.effectContext(),
     };

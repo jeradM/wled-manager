@@ -350,6 +350,36 @@ describe("import", () => {
     expect((await get<ImportPreview>(`/api/controllers/${c.id}/import`)).presets[0]).toMatchObject({ status: "changed", edited: false });
   });
 
+  it("puts group prefixes on preset names and takes them off pulled ones", async () => {
+    const c = await setup();
+    await t.app.inject({ method: "PUT", url: "/api/settings", payload: { groupPrefixes: { Xmas: "X1" } } });
+    await post("/api/presets", { ...statePreset(1, "Glow", [{ fx: 0 }]), folder: "Xmas" });
+    await post("/api/presets", statePreset(2, "Plain", [{ fx: 0 }]));
+    await post(`/api/controllers/${c.id}/sync`, {});
+    expect([devicePresets()["1"].n, devicePresets()["2"].n]).toEqual(["X1 Glow", "Plain"]);
+    expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
+
+    // Renamed in the WLED UI, and a new preset saved there with the group's prefix.
+    const files = devicePresets();
+    files["1"].n = "X1 Glowing";
+    files["3"] = { bri: 50, seg: [{ fx: 0 }], n: "X1 Twinkle" };
+    mock.files.set("/presets.json", JSON.stringify(files));
+    const preview = await get<ImportPreview>(`/api/controllers/${c.id}/import`);
+    expect(preview.presets.map((p) => [p.slot, p.status, p.changes])).toEqual([
+      [1, "changed", ["name"]],
+      [2, "identical", undefined],
+      [3, "new", undefined],
+    ]);
+    await post(`/api/controllers/${c.id}/import`, { palettes: [], presets: [1, 3] });
+    const presets = await get<Preset[]>("/api/presets");
+    expect(presets.map((p) => [p.slot, p.name, p.folder])).toEqual([
+      [1, "Glowing", "Xmas"],
+      [2, "Plain", undefined],
+      [3, "Twinkle", "Xmas"],
+    ]);
+    expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
+  });
+
   it("reports conflicts with different library presets in the same slot and replaces them on import", async () => {
     const c = await setup();
     deviceFiles();

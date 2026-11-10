@@ -7,6 +7,7 @@ import {
   joinGroup,
   linkSegment,
   litLeds,
+  deviceName,
   duplicateSegment,
   keepPadding,
   moveSegment,
@@ -84,7 +85,8 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
     controllers[0];
   const { data: catalog } = useCatalog(sourceController?.id);
   const rgbw = sourceController?.device?.rgbw ?? false;
-  const orderedSlots = useSettings().data?.presetSlots === "ordered";
+  const settings = useSettings().data;
+  const orderedSlots = settings?.presetSlots === "ordered";
 
   const freeSlot = useMemo(() => {
     const used = new Set(allPresets.map((p) => p.slot));
@@ -471,7 +473,7 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
                 list="preset-folders"
                 maxLength={40}
                 placeholder="None"
-                title="Groups only organize the presets list in this app; controllers never see them."
+                title="Groups organize the presets list in this app. Controllers only see a group's name prefix, if it has one (set it on the Presets page)."
                 onChange={(e) => setDraft({ ...draft, folder: e.target.value.trim() ? e.target.value : undefined })}
               />
               <datalist id="preset-folders">
@@ -496,6 +498,11 @@ function PresetEditor({ id, folder, from }: { id?: string; folder?: string; from
               />
             </div>
             {slotTaken && <p className="mt-2 text-xs text-red-400">Slot {draft.slot} is used by "{slotTaken.name}".</p>}
+            {draft.folder?.trim() && settings?.groupPrefixes[draft.folder.trim()] && draft.name.trim() && (
+              <p className="mt-2 text-xs text-neutral-500">
+                Named "{deviceName({ name: draft.name.trim(), folder: draft.folder.trim() }, settings.groupPrefixes)}" on controllers.
+              </p>
+            )}
             <p className="mt-2 text-xs text-neutral-500">
               {orderedSlots
                 ? "Sync numbers presets in order by group and name (see Settings), so this slot isn't used on controllers."

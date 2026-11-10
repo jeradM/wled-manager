@@ -9,6 +9,7 @@ import {
   paletteStopsFor,
   remapPresetRefs,
   renderPreset,
+  stripGroupPrefix,
   type DevicePreset,
   type ImportPalette,
   type ImportPreset,
@@ -149,15 +150,19 @@ export class ImportService {
     const target = this.sync.target(controllerId, device, effects);
     const { libraryPreset, toLibrary } = this.slotMatching(target, deviceSlots);
     const written = this.syncState(controllerId)?.writtenPresets ?? {};
+    const prefixes = target.renderCtx.groupPrefixes;
     return (slot: number, raw: DevicePreset) => {
-      const imported = toLibrary(importPreset(slot, raw, { effects, libraryPalette }));
       const existing = libraryPreset(slot);
+      // Names lose the group prefix sync put on them; a new preset goes in the group whose prefix it had.
+      const plain = importPreset(slot, raw, { effects, libraryPalette });
+      const { name, folder } = stripGroupPrefix(plain.name, prefixes, existing ? (existing.folder ?? "") : undefined);
+      const imported = toLibrary({ ...plain, name, ...(folder && !existing ? { folder } : {}) });
       if (!existing) return { status: "new" as const, imported };
       const rendered = renderPreset(existing, target.renderCtx);
       const edited = canonicalJson(raw) !== written[slot];
       if (canonicalJson(rendered.json) === canonicalJson(raw)) return { status: "identical" as const, imported, existing };
       const { id: _, revision, updatedAt, ...current } = existing;
-      const pulled = isStatePreset(raw) ? pullPreset(current, rendered, raw, { effects, libraryPalette }) : null;
+      const pulled = isStatePreset(raw) ? pullPreset(current, rendered, raw, { effects, libraryPalette, groupPrefixes: prefixes }) : null;
       if (!pulled) return { status: "conflict" as const, imported, existing, edited };
       // Nothing the library keeps differs, e.g. only settings WLED adds when saving a preset.
       if (canonicalJson(pulled.preset) === canonicalJson(current)) return { status: "identical" as const, imported, existing };
