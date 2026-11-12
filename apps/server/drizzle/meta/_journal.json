@@ -99,6 +99,13 @@
       "when": 1793303869518,
       "tag": "0013_layouts",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794525851379,
+      "tag": "0014_pattern_effects",
+      "breakpoints": true
     }
   ]
 }

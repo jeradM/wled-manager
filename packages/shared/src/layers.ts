@@ -115,21 +115,36 @@ export interface LayerOrigin {
 }
 
 /**
+ * A layer's LEDs: the segment's, less its `ledOffset` from the start. In a reversed segment the layer's place
+ * in the repeat (grouping plus spacing long) is mirrored, as WLED keeps groups where they are when reversing.
+ * Null when the offset leaves no LEDs.
+ */
+function offsetPlacement(place: Segment, l: Layer): Segment | null {
+  if (typeof l.ledOffset !== "number" || typeof place.start !== "number" || typeof place.stop !== "number") return place;
+  const skip = place.rev ? Math.max(0, (l.spc ?? 0) - l.ledOffset) : l.ledOffset;
+  const start = place.start + skip;
+  return start < place.stop ? { ...place, start } : null;
+}
+
+/**
  * The segments as WLED sees them: each layer a segment of its own on the parent's LEDs, in order, bottom
- * layer first. IDs are left as they are; `origin` says which segment and layer each one is.
+ * layer first, less any `ledOffset` it has (a layer it leaves no LEDs is left out). IDs are left as
+ * they are; `origin` says which segment and layer each one is.
  */
 export function expandLayers(seg: Segment[]): { seg: Segment[]; origin: LayerOrigin[] } {
   const out: Segment[] = [];
   const origin: LayerOrigin[] = [];
   seg.forEach((s, i) => {
-    if (!s.layers?.length) {
+    if (!s.layers?.length && s.ledOffset === undefined) {
       out.push(s);
       origin.push({ segment: i, layer: 0 });
       return;
     }
     const place = placementOf(s);
-    segmentLayers(s).forEach((l, k) => {
-      out.push({ ...place, ...l });
+    segmentLayers(s).forEach(({ ledOffset, ...l }, k) => {
+      const at = offsetPlacement(place, { ...l, ledOffset });
+      if (!at) return;
+      out.push({ ...at, ...l });
       origin.push({ segment: i, layer: k });
     });
   });

@@ -105,6 +105,46 @@ describe("preset sync", () => {
     expect((await get<SyncPlan>(`/api/controllers/${c.id}/sync-plan`)).inSync).toBe(true);
   });
 
+  it("lays linked patterns out on each controller's LEDs, following edits, and doesn't pull changes to them", async () => {
+    const c = await setup();
+    const red = [255, 0, 0];
+    const blue = [0, 0, 255];
+    const runs = [{ count: 2, color: red }, { count: 1, color: null }, { count: 3, color: blue }];
+    const res = await t.app.inject({ method: "POST", url: "/api/effects", payload: { name: "Candy", layers: [{}], pattern: { runs } } });
+    expect(res.statusCode).toBe(201);
+    const pattern = res.json<{ id: string; layers: unknown[] }>();
+    expect(pattern.layers).toHaveLength(2);
+    await post<Preset>("/api/presets", statePreset(6, "Candy", [{ id: 0, start: 0, stop: 421, effectId: pattern.id }]));
+    await post(`/api/controllers/${c.id}/sync`, {});
+    const look = { on: true, bri: 255, fx: 0, pal: 0, bm: 0, of: 0 };
+    expect(devicePresets()["6"].seg).toEqual([
+      { id: 0, start: 0, stop: 60, ...look, col: [red], grp: 2, spc: 4 },
+      { id: 1, start: 3, stop: 60, ...look, col: [blue], grp: 3, spc: 3 },
+    ]);
+
+    // Editing the pattern remakes its segments.
+    const edited = [{ count: 1, color: red }, { count: 1, color: blue }];
+    await t.app.inject({ method: "PUT", url: `/api/effects/${pattern.id}`, payload: { name: "Candy", layers: [{}], pattern: { runs: edited } } });
+    await post(`/api/controllers/${c.id}/sync`, {});
+    expect(devicePresets()["6"].seg.map((s: { start: number; grp: number; spc: number }) => [s.start, s.grp, s.spc])).toEqual([
+      [0, 1, 1],
+      [1, 1, 1],
+    ]);
+
+    // Changed in the WLED UI: there's nothing to pull, and a note says why.
+    const files = devicePresets();
+    files["6"].seg[1].col = [[0, 255, 0]];
+    mock.files.set("/presets.json", JSON.stringify(files));
+    const preview = await get<ImportPreview>(`/api/controllers/${c.id}/import`);
+    expect(preview.presets.find((p) => p.slot === 6)).toMatchObject({
+      status: "identical",
+      notes: ['Segment 0: uses the pattern "Candy", so its changes aren\'t pulled; edit the pattern instead'],
+    });
+
+    const bad = await t.app.inject({ method: "POST", url: "/api/effects", payload: { name: "Dark", layers: [{}], pattern: { runs: [{ count: 2, color: null }] } } });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it("removes presets with sync turned off from the controller, keeping them in the app", async () => {
     const c = await setup();
     const xmas = await post<Preset>("/api/presets", statePreset(10, "Xmas", [{ fx: 0 }]));

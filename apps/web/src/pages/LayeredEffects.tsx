@@ -49,7 +49,9 @@ const describeLayers = (layers: Layer[]) =>
     .join(" over ");
 
 export function LayeredEffects() {
-  const { data: effects = [], isLoading } = useLayeredEffects();
+  const { data: all = [], isLoading } = useLayeredEffects();
+  // Patterns are listed on their own page.
+  const effects = all.filter((e) => !e.pattern);
   const { data: palettes = [] } = usePalettes();
   const { data: presets = [] } = usePresets();
   return (

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { patternProblem, patternSegments, type PatternRun } from "./pattern.js";
+import { patternLayers, patternProblem, patternSegments } from "./pattern.js";
+import { expandLayers, withLayers } from "./layers.js";
+import { renderPreset } from "./presets.js";
 import { Simulator } from "./sim/index.js";
-import type { WledColor } from "./schemas.js";
+import type { PatternRun, Segment, WledColor } from "./schemas.js";
 
 const red: WledColor = [255, 0, 0];
 const blue: WledColor = [0, 0, 255];
@@ -88,5 +90,59 @@ describe("patternSegments", () => {
     expect(patternProblem([{ count: 1, color: red }, { count: 300, color: null }], 0, 1000)).toMatch(/repeat within 255/);
     expect(patternProblem([{ count: 2, color: red }], 0, 10)).toBeNull();
     expect(patternSegments([{ count: 3, color: null }], 0, 10)).toEqual([]);
+  });
+});
+
+describe("patternLayers", () => {
+  const runs: PatternRun[] = [
+    { count: 2, color: red },
+    { count: 1, color: null },
+    { count: 3, color: blue },
+  ];
+  /** A segment on `start`–`stop` with the pattern as its layers, as WLED segments. */
+  const laidOut = (place: Segment) => expandLayers([withLayers(place, patternLayers(runs))]).seg;
+
+  it("starts each layer at its run, on whatever LEDs the segment has", () => {
+    expect(patternLayers(runs).map((l) => [l.ledOffset, l.grp, l.spc, l.col])).toEqual([
+      [0, 2, 4, [red]],
+      [3, 3, 3, [blue]],
+    ]);
+    expect(laidOut({ start: 10, stop: 40 }).map((s) => [s.start, s.stop, s.ledOffset])).toEqual([
+      [10, 40, undefined],
+      [13, 40, undefined],
+    ]);
+    expect(render(laidOut({ start: 0, stop: 18 }), 18)).toBe("RR.BBB".repeat(3));
+  });
+
+  it("runs the other way along a reversed segment", () => {
+    expect(laidOut({ start: 0, stop: 20, rev: true }).map((s) => [s.start, s.stop])).toEqual([
+      [4, 20],
+      [0, 20],
+    ]);
+    expect(render(laidOut({ start: 0, stop: 20, rev: true }), 20)).toBe("BBB.RR".repeat(4).slice(0, 20));
+  });
+
+  it("leaves out layers that start past a short segment's end", () => {
+    expect(laidOut({ start: 0, stop: 3 }).map((s) => s.grp)).toEqual([2]);
+    expect(laidOut({ start: 0, stop: 3, rev: true }).map((s) => s.grp)).toEqual([3]);
+  });
+
+  it("lays a linked pattern out on each controller's own LEDs when synced", () => {
+    const pattern = patternLayers(runs);
+    const preset = { slot: 1, name: "Candy", kind: "state" as const, state: { seg: [{ start: 0, stop: 421, effectId: "candy" }] } };
+    const ctx = (ledCount: number) => ({ effects: [], devicePalette: () => undefined, ledCount, effect: (id: string) => (id === "candy" ? pattern : undefined) });
+    const seg = (n: number) => (renderPreset(preset, ctx(n)).json.seg as Segment[]).map((s) => [s.start, s.stop, s.grp, s.spc, "ledOffset" in s]);
+    expect(seg(169)).toEqual([
+      [0, 169, 2, 4, false],
+      [3, 169, 3, 3, false],
+    ]);
+    expect(seg(421)).toEqual([
+      [0, 421, 2, 4, false],
+      [3, 421, 3, 3, false],
+    ]);
+  });
+
+  it("makes nothing from a pattern WLED can't make", () => {
+    expect(patternLayers([{ count: 3, color: null }])).toEqual([]);
   });
 });

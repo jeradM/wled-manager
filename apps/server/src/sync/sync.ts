@@ -67,6 +67,11 @@ export class SyncService {
     private settings: SettingsService,
   ) {}
 
+  /** The pattern's name, when the layered effect is a pattern. */
+  patternName(effectId: string): string | undefined {
+    return this.effects.list().find((e) => e.id === effectId && e.pattern)?.name;
+  }
+
   /** Lookups for presets' links to layered effects. */
   private effectContext() {
     const all = new Map(this.effects.list().map((e) => [e.id, e]));

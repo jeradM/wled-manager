@@ -162,10 +162,11 @@ export class ImportService {
       const edited = canonicalJson(raw) !== written[slot];
       if (canonicalJson(rendered.json) === canonicalJson(raw)) return { status: "identical" as const, imported, existing };
       const { id: _, revision, updatedAt, ...current } = existing;
-      const pulled = isStatePreset(raw) ? pullPreset(current, rendered, raw, { effects, libraryPalette, groupPrefixes: prefixes }) : null;
+      const pulled = isStatePreset(raw) ? pullPreset(current, rendered, raw, { effects, libraryPalette, groupPrefixes: prefixes, patternName: (id) => this.sync.patternName(id) }) : null;
       if (!pulled) return { status: "conflict" as const, imported, existing, edited };
-      // Nothing the library keeps differs, e.g. only settings WLED adds when saving a preset.
-      if (canonicalJson(pulled.preset) === canonicalJson(current)) return { status: "identical" as const, imported, existing };
+      // Nothing the library keeps differs, e.g. only settings WLED adds when saving a preset, or ones made from a pattern.
+      if (canonicalJson(pulled.preset) === canonicalJson(current))
+        return { status: "identical" as const, imported, existing, ...(pulled.notes.length ? { pulled: { ...pulled, changes: [] } } : {}) };
       return { status: "changed" as const, imported, existing, edited, pulled };
     };
   }

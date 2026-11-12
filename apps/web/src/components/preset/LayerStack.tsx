@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { resolveLayerLinks, type Layer, type LayeredEffect, type Palette } from "@wled-manager/shared";
+import { resolveLayerLinks, type Layer, type LayeredEffect, type Palette, type PatternRun } from "@wled-manager/shared";
 import { useLayeredEffects, useWriteLayeredEffect, type Catalog } from "../../queries";
 import { LayerEditor, layerEffectName } from "./LayerEditor";
 import { newSegment } from "./describe";
 import { BLEND_MODES } from "./wled-options";
+import { colorCss } from "./color";
 
 /** A layer added with "+ Add layer": solid amber, blended normally. */
 export const newLayer = (rgbw: boolean): Layer => newSegment(rgbw);
@@ -47,9 +48,12 @@ export function LayerStack({
   /** Called when layers move or go, with each old index's new one (undefined when removed). */
   onRemap?: (map: (k: number) => number | undefined) => void;
 }) {
-  const { data: effects = [] } = useLayeredEffects();
+  const { data: stored = [] } = useLayeredEffects();
+  // Patterns are offered where layers link (a layered effect holds layers, not links), apart from effects.
+  const effects = stored.filter((e) => !e.pattern);
+  const patterns = linkEffects ? stored.filter((e) => e.pattern) : [];
   const saveEffect = useWriteLayeredEffect();
-  const byId = new Map(effects.map((e) => [e.id, e]));
+  const byId = new Map(stored.map((e) => [e.id, e]));
   /** WLED segments a layer takes: a linked effect takes one per layer. */
   const cost = (l: Layer) => (l.effectId !== undefined ? (byId.get(l.effectId)?.layers.length ?? 1) : 1);
   const stackCost = layers.reduce((n, l) => n + cost(l), 0);
@@ -86,7 +90,7 @@ export function LayerStack({
   const onAdd = (v: string) => {
     const top = layers.length - 1;
     const [action, id] = v.split(":");
-    const effect = effects.find((e) => e.id === id);
+    const effect = stored.find((e) => e.id === id);
     if (action === "blank") insertAbove(top, newLayer(rgbw));
     else if (action === "copy") insertAbove(top, structuredClone(layers[top]!));
     else if (action === "add" && effect) {
@@ -143,6 +147,25 @@ export function LayerStack({
         {effects.length > 0 && (
           <optgroup label={linkEffects ? "Replace these layers with a link to" : "Replace these layers with"}>
             {effects.map((e) => (
+              <option key={e.id} value={`replace:${e.id}`} disabled={e.layers.length - stackCost > room}>
+                {e.name}
+                {e.layers.length - stackCost > room ? " – no room" : ""}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {patterns.length > 0 && (
+          <optgroup label="Link a pattern on top">
+            {patterns.map((e) => (
+              <option key={e.id} value={`add:${e.id}`} disabled={e.layers.length > room}>
+                {e.name} ({e.layers.length} segment{e.layers.length === 1 ? "" : "s"}){e.layers.length > room ? " – no room" : ""}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {patterns.length > 0 && (
+          <optgroup label="Replace these layers with the pattern">
+            {patterns.map((e) => (
               <option key={e.id} value={`replace:${e.id}`} disabled={e.layers.length - stackCost > room}>
                 {e.name}
                 {e.layers.length - stackCost > room ? " – no room" : ""}
@@ -227,8 +250,13 @@ export function LayerStack({
                   {top ? " (top)" : k === 0 ? " (bottom)" : ""}
                 </span>
                 {isLink ? (
-                  <span className="truncate text-violet-300" title="Linked: follows changes to the layered effect">
-                    ⛓ {linked ? `${linked.name} · layered effect, ${linked.layers.length} layer${linked.layers.length === 1 ? "" : "s"}` : "missing layered effect"}
+                  <span className="truncate text-violet-300" title={`Linked: follows changes to the ${linked?.pattern ? "pattern" : "layered effect"}`}>
+                    ⛓{" "}
+                    {!linked
+                      ? "missing layered effect"
+                      : linked.pattern
+                        ? `${linked.name} · pattern, ${linked.layers.length} segment${linked.layers.length === 1 ? "" : "s"}`
+                        : `${linked.name} · layered effect, ${linked.layers.length} layer${linked.layers.length === 1 ? "" : "s"}`}
                   </span>
                 ) : (
                   <span className="truncate text-neutral-400">{layerEffectName(l, catalog)}</span>
@@ -237,7 +265,18 @@ export function LayerStack({
               <span className="flex items-center gap-2">
                 {layerExtra?.(k)}
                 {!isCollapsed && !isLink && allControls(k)}
-                {linked && (
+                {linked?.pattern && (
+                  <Link
+                    to="/patterns/$id"
+                    params={{ id: linked.id }}
+                    target="_blank"
+                    className="text-sky-400 hover:text-sky-300"
+                    title="Edit the pattern (opens in a new tab). Every segment using it follows."
+                  >
+                    Edit pattern
+                  </Link>
+                )}
+                {linked && !linked.pattern && (
                   <>
                     <Link
                       to="/effects/$id"
@@ -279,7 +318,9 @@ export function LayerStack({
             </div>
             {!isCollapsed && isLink && (
               <div className="border-t border-neutral-800 px-3 py-2 text-xs text-neutral-400">
-                {linked ? (
+                {linked?.pattern ? (
+                  <PatternRuns runs={linked.pattern.runs} />
+                ) : linked ? (
                   <ol className="space-y-0.5">
                     {linked.layers
                       .map((x, j) => (
@@ -304,6 +345,23 @@ export function LayerStack({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** A pattern's repeat, LED by LED. */
+function PatternRuns({ runs }: { runs: PatternRun[] }) {
+  return (
+    <div className="flex flex-wrap gap-0.5" aria-label="One repeat">
+      {runs.flatMap((r, i) =>
+        Array.from({ length: Math.min(r.count, 64) }, (_, k) => (
+          <span
+            key={`${i}-${k}`}
+            className={`size-2.5 rounded-full ${r.color ? "" : "border border-dashed border-neutral-600"}`}
+            style={r.color ? { background: colorCss(r.color) } : undefined}
+          />
+        )),
+      )}
     </div>
   );
 }

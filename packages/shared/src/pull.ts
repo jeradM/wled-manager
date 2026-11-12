@@ -35,6 +35,8 @@ export interface PullContext {
   effects: string[];
   /** The library palette a device palette ID is, when it's one of the custom palettes sync put there. */
   libraryPalette: (devicePaletteId: number) => string | undefined;
+  /** A pattern's name, when the layered effect `effectId` is a pattern. */
+  patternName?: (effectId: string) => string | undefined;
   /** Prefixes sync puts on preset names, by group; taken back off names pulled. */
   groupPrefixes?: Record<string, string>;
 }
@@ -95,6 +97,15 @@ export function pullPreset(library: PresetInput, rendered: RenderedPreset, devic
     if (!origin) return;
     const { segment: i, layer: k } = origin;
     const d = deviceById.get(segId(r, j))!;
+
+    // A pattern's segments are made from the pattern, so it's changed in the app instead.
+    const pattern = segmentLayers(seg[i]!).flatMap((l) => (l.effectId !== undefined ? [ctx.patternName?.(l.effectId)] : [])).find(Boolean);
+    if (pattern) {
+      const fields = [...Object.keys(LOOK_FIELDS), ...Object.keys(PLACEMENT_FIELDS)];
+      if (fields.some((f) => d[f] !== undefined && !same(f, r[f], d[f])))
+        notes.add(`${label(i, 0).replace(/ layer \d+$/, "")}: uses the pattern "${pattern}", so its changes aren't pulled; edit the pattern instead`);
+      return;
+    }
 
     // The looks of this layer.
     const looks: [string, unknown][] = [];

@@ -1,5 +1,5 @@
 import { blob, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import type { Layer, LayoutLine, LedLayout, LedMarker, LedRange, PaletteStop, PaletteVariant, PresetState, SegmentDefinition, SegmentGroup } from "@wled-manager/shared";
+import type { Layer, LayoutLine, LedLayout, LedMarker, LedRange, PaletteStop, PaletteVariant, PatternRun, PresetState, SegmentDefinition, SegmentGroup } from "@wled-manager/shared";
 import type { WledInfo } from "../wled/client.js";
 
 const timestamps = {
@@ -71,6 +71,8 @@ export const layeredEffects = sqliteTable("layered_effects", {
   name: text("name").notNull(),
   /** Bottom to top. */
   layers: text("layers", { mode: "json" }).$type<Layer[]>().notNull(),
+  /** For a pattern, the runs its layers are made from. */
+  pattern: text("pattern", { mode: "json" }).$type<{ runs: PatternRun[] }>(),
   revision: integer("revision").notNull().default(1),
   ...timestamps,
 });

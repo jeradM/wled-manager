@@ -1,0 +1,1 @@
+ALTER TABLE `layered_effects` ADD `pattern` text;

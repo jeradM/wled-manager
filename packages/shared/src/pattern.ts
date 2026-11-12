@@ -1,7 +1,4 @@
-import type { Segment, WledColor } from "./schemas.js";
-
-/** A run of lights in one repeat of a pattern: `count` LEDs of `color`, or dark when it's null. */
-export type PatternRun = { count: number; color: WledColor | null };
+import type { Layer, PatternRun, Segment, WledColor } from "./schemas.js";
 
 /** WLED's limits on grouping and spacing. */
 export const MAX_GROUPING = 255;
@@ -10,8 +7,8 @@ export const MAX_SPACING = 255;
 /** LEDs in one repeat. */
 export const patternLength = (runs: PatternRun[]) => runs.reduce((n, r) => n + Math.max(0, r.count), 0);
 
-/** Why the pattern can't be made into segments, or null when it can. */
-export function patternProblem(runs: PatternRun[], start: number, stop: number): string | null {
+/** Why the pattern can't be made into segments, or null when it can. Without LEDs, only the repeat is checked. */
+export function patternProblem(runs: PatternRun[], start = 0, stop = Infinity): string | null {
   const length = patternLength(runs);
   if (!runs.some((r) => r.color && r.count > 0)) return "Add at least one colored run";
   if (runs.some((r) => !Number.isInteger(r.count) || r.count < 0)) return "Runs need a whole number of LEDs";
@@ -112,6 +109,37 @@ function runPaints(runs: PatternRun[]): Paint[] {
 
 const BLACK: WledColor = [0, 0, 0];
 
+/** The paints that make one repeat: overlapping when that takes fewer, one per colored run otherwise. */
+function repeatPaints(runs: PatternRun[]): Paint[] {
+  const length = patternLength(runs);
+  const fits = (p: Paint) => p.to - p.from + 1 <= MAX_GROUPING && length - (p.to - p.from + 1) <= MAX_SPACING;
+  const paints = planPaints(runs, MAX_GROUPING);
+  return paints.every(fits) ? paints : runPaints(runs);
+}
+
+/**
+ * A pattern as layers on a segment's LEDs, bottom first (see `patternSegments`): each starts `ledOffset` LEDs
+ * in and paints its stretch of every repeat in solid color (blend mode Top). Empty when the pattern can't be made.
+ */
+export function patternLayers(runs: PatternRun[]): Layer[] {
+  if (patternProblem(runs)) return [];
+  const length = patternLength(runs);
+  const rgbw = runs.some((r) => Array.isArray(r.color) && r.color.length === 4);
+  return repeatPaints(runs).map((p) => ({
+    on: true,
+    bri: 255,
+    fx: 0,
+    fxName: "Solid",
+    col: [structuredClone(p.color ?? (rgbw ? [0, 0, 0, 0] : BLACK))],
+    pal: 0,
+    bm: 0,
+    grp: p.to - p.from + 1,
+    spc: length - (p.to - p.from + 1),
+    of: 0,
+    ledOffset: p.from,
+  }));
+}
+
 /**
  * Segments that repeat the pattern over start–stop, as few as overlapping allows: each paints a stretch of one
  * repeat, grouping its LEDs as one pixel and spacing the rest of the repeat, so it lands on the same stretch of
@@ -122,9 +150,7 @@ const BLACK: WledColor = [0, 0, 0];
 export function patternSegments(runs: PatternRun[], start: number, stop: number, name = "Pattern"): Segment[] {
   if (patternProblem(runs, start, stop)) return [];
   const length = patternLength(runs);
-  const fits = (p: Paint) => p.to - p.from + 1 <= MAX_GROUPING && length - (p.to - p.from + 1) <= MAX_SPACING;
-  let paints = planPaints(runs, MAX_GROUPING);
-  if (!paints.every(fits)) paints = runPaints(runs);
+  const paints = repeatPaints(runs);
   const rgbw = runs.some((r) => Array.isArray(r.color) && r.color.length === 4);
   const out: Segment[] = paints
     .filter((p) => start + p.from < stop)

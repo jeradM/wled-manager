@@ -82,6 +82,11 @@ const layerFields = {
    * when the preset is rendered, so presets follow changes to the effect. Its other fields are ignored.
    */
   effectId: z.string().min(1).optional(),
+  /**
+   * LEDs into the segment where this layer starts, counted from its end when it's reversed (manager only): a
+   * pattern's layers start at their run in the repeat. Applied once the segment's LEDs are known.
+   */
+  ledOffset: z.number().int().min(0).max(255).optional(),
 };
 
 /**
@@ -147,14 +152,20 @@ export const segmentGroup = z.object({
 });
 export type SegmentGroup = z.infer<typeof segmentGroup>;
 
+/** A run of lights in one repeat of a pattern: `count` LEDs of `color`, or dark when it's null. */
+export const patternRun = z.object({ count: z.number().int().min(1).max(255), color: wledColor.nullable() });
+export type PatternRun = z.infer<typeof patternRun>;
+
 /**
  * A layered effect: a stack of layers kept in the library, apart from any preset. Applying it to a segment
  * copies its layers onto the segment.
  */
 export const layeredEffectInput = z.object({
   name: z.string().trim().min(1).max(64),
-  /** Bottom to top, as WLED draws them. */
+  /** Bottom to top, as WLED draws them. Made from `pattern` when there is one. */
   layers: z.array(layer).min(1).max(32),
+  /** A repeating pattern: the effect is its layers, made from one repeat's runs (see `patternLayers`). */
+  pattern: z.object({ runs: z.array(patternRun).min(1).max(64) }).optional(),
 });
 export type LayeredEffectInput = z.infer<typeof layeredEffectInput>;
 

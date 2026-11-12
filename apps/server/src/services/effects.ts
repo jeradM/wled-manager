@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { asc, eq, sql } from "drizzle-orm";
-import { inlineEffect, type LayeredEffect, type LayeredEffectInput } from "@wled-manager/shared";
+import { inlineEffect, patternLayers, patternProblem, type LayeredEffect, type LayeredEffectInput } from "@wled-manager/shared";
 import type { Db } from "../db/index.js";
 import { layeredEffects, presets } from "../db/schema.js";
 import type { EventBus } from "../events.js";
@@ -12,11 +12,20 @@ const toEffect = (row: Row): LayeredEffect => ({
   id: row.id,
   name: row.name,
   layers: row.layers,
+  ...(row.pattern ? { pattern: row.pattern } : {}),
   revision: row.revision,
   updatedAt: row.updatedAt,
 });
 
-/** Layered effects: stacks of layers kept apart from presets, to apply to segments. */
+/** What's stored for an effect: a pattern's layers are made from its runs. */
+function stored(input: LayeredEffectInput) {
+  if (!input.pattern) return { name: input.name, layers: input.layers, pattern: null };
+  const problem = patternProblem(input.pattern.runs);
+  if (problem) throw Object.assign(new Error(problem), { statusCode: 400 });
+  return { name: input.name, layers: patternLayers(input.pattern.runs), pattern: input.pattern };
+}
+
+/** Layered effects (repeating patterns among them): stacks of layers kept apart from presets, to apply to segments. */
 export class LayeredEffectService {
   constructor(
     private db: Db,
@@ -36,7 +45,7 @@ export class LayeredEffectService {
   create(input: LayeredEffectInput): LayeredEffect {
     const row = this.db
       .insert(layeredEffects)
-      .values({ id: randomUUID(), name: input.name, layers: input.layers })
+      .values({ id: randomUUID(), ...stored(input) })
       .returning()
       .get();
     this.events.publish({ type: "effects.changed" });
@@ -47,7 +56,7 @@ export class LayeredEffectService {
     this.get(id);
     const row = this.db
       .update(layeredEffects)
-      .set({ name: input.name, layers: input.layers, revision: sql`${layeredEffects.revision} + 1`, updatedAt: new Date().toISOString() })
+      .set({ ...stored(input), revision: sql`${layeredEffects.revision} + 1`, updatedAt: new Date().toISOString() })
       .where(eq(layeredEffects.id, id))
       .returning()
       .get();

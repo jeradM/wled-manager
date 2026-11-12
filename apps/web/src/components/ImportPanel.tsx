@@ -9,7 +9,7 @@ function presetStatus(p: ImportPreset): [string, string] {
     case "new":
       return ["New: adds it to the library", "text-emerald-400"];
     case "identical":
-      return ["In sync", "text-neutral-500"];
+      return p.notes?.length ? ["Nothing to pull", "text-neutral-500"] : ["In sync", "text-neutral-500"];
     case "changed":
       return p.edited
         ? [`Edited on controller: updates "${p.libraryName}"`, "text-sky-400"]
@@ -77,8 +77,10 @@ export function ImportPanel({ controllerId, onClose }: { controllerId: string; o
     run.mutate({ palettes: [...palettes], presets: [...presets] });
   };
 
-  const inSync = preview?.presets.filter((p) => p.status === "identical").length ?? 0;
-  const listed = preview?.presets.filter((p) => showInSync || p.status !== "identical") ?? [];
+  // Presets in sync are hidden unless asked for, but not ones with changes on the controller that can't be pulled.
+  const quiet = (p: ImportPreset) => p.status === "identical" && !p.notes?.length;
+  const inSync = preview?.presets.filter(quiet).length ?? 0;
+  const listed = preview?.presets.filter((p) => showInSync || !quiet(p)) ?? [];
   const count = palettes.size + presets.size;
 
   return (

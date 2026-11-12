@@ -244,9 +244,22 @@ export function renderPreset(preset: PresetInput, ctx: RenderContext): RenderedP
   if (repeated.length)
     warnings.push(`segment ID${repeated.length > 1 ? "s" : ""} ${repeated.join(", ")} used more than once; only the last of each is applied`);
   const placed = segs.map((s) => (s.sid !== undefined && ctx.segment ? ctx.segment(s.sid) : undefined));
+  // Each segment's LEDs on this controller: a defined segment's from its definition, others' stops clamped to
+  // the end of the strip. Layers are laid out on them, so patterns repeat from where the segment starts here.
+  const sized = segs.map((s, i): Segment => {
+    const r = placed[i];
+    if (r?.ok) {
+      const { start, stop, rev, name } = r.segment;
+      const { n: _, ...rest } = s;
+      return { ...rest, start, stop, rev, ...(name ? { n: name } : {}) };
+    }
+    const n = ctx.ledCount;
+    if (r || n === undefined || isClearMarker(s) || typeof s.stop !== "number" || s.stop <= n) return s;
+    return typeof s.start === "number" && s.start >= n ? s : { ...s, stop: n };
+  });
   // Layers become WLED segments of their own on the same LEDs, numbered in order.
   const layered = segs.some((s) => s.layers?.length);
-  const expanded = expandLayers(segs);
+  const expanded = expandLayers(sized);
   const explicitIds = segs.some((s) => s.id !== undefined) || placed.some((r) => r && !r.ok);
   // Left-out segments mustn't renumber the others, so IDs become explicit. A preset that turns other segments
   // off turns the left-out ones off too.
@@ -272,17 +285,9 @@ export function renderPreset(preset: PresetInput, ctx: RenderContext): RenderedP
       if (layer === 0) warnings.push(`segment ${segs[i]!.id ?? i} left out: ${r.error}`);
       return clearsOthers ? [{ id, stop: 0 }] : [];
     }
-    if (r?.ok) {
-      const { start, stop, rev, name } = r.segment;
-      Object.assign(rendered, { start, stop, rev });
-      if (name) rendered.n = name;
-      else delete rendered.n;
-    } else if (ctx.ledCount !== undefined) {
-      const n = ctx.ledCount;
-      if (typeof rendered.start === "number" && rendered.start >= n) {
-        if (layer === 0) warnings.push(`segment ${segs[i]!.id ?? i} starts at LED ${rendered.start}, past this controller's ${n} LEDs; it won't show`);
-      } else if (typeof rendered.stop === "number" && rendered.stop > n) rendered.stop = n;
-    }
+    const start = segs[i]!.start;
+    if (!r && ctx.ledCount !== undefined && layer === 0 && typeof start === "number" && start >= ctx.ledCount)
+      warnings.push(`segment ${segs[i]!.id ?? i} starts at LED ${start}, past this controller's ${ctx.ledCount} LEDs; it won't show`);
     if (fxName !== undefined && ctx.effects.length) {
       // Effect IDs can shift between firmware versions; the name is authoritative when present.
       const idx = ctx.effects.indexOf(fxName);
